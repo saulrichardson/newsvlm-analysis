@@ -1,4 +1,4 @@
-# `newsvlm-analysis`
+# `newspaper-analysis`
 
 This repository contains **analysis workflows** built on top of the upstream extraction artifacts produced by the
 `newsvlm` engine repo (OCR `*.vlm.json`, zoning labels, issue-level outputs, stitched ordinance docs, etc.).
