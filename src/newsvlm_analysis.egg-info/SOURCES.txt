@@ -1,9 +1,0 @@
-README.md
-pyproject.toml
-src/newsvlm_analysis/__init__.py
-src/newsvlm_analysis/cluster_topic_label_schema.py
-src/newsvlm_analysis/zoning_mechanics.py
-src/newsvlm_analysis.egg-info/PKG-INFO
-src/newsvlm_analysis.egg-info/SOURCES.txt
-src/newsvlm_analysis.egg-info/dependency_links.txt
-src/newsvlm_analysis.egg-info/top_level.txt
