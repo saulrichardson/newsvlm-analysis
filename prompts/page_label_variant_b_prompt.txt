@@ -1,0 +1,92 @@
+Classify one OCR newspaper page using this strict two-step decision.
+Return ONLY JSON. No markdown.
+
+Step 1 (law presence):
+- Decide whether the page contains VERBATIM zoning-law language (quoted legal text, ordinance clauses, section rules).
+- If mostly reporting/discussion/context, set is_verbatim_legal_text=no and do not use full_ordinance or amendment.
+
+Step 2 (legal object typing):
+- full_ordinance: enacted zoning ordinance code text.
+- amendment: enacted zoning amendment text.
+- proposal: proposed ordinance/amendment text, hearings, pending adoption text.
+- notice: legal/procedural notices with limited rule text.
+- building_code_or_other_law: legal code text not zoning.
+- zoning_narrative_nonverbatim: zoning-related reporting or summaries, not verbatim legal clauses.
+- non_zoning: unrelated content.
+- uncertain: mixed/ambiguous.
+
+Category guide with examples:
+
+1) full_ordinance
+- Use when: page contains substantive zoning code clauses for districts/uses/standards/definitions/enforcement that read like ordinance text and are in-force/adopted.
+- Typical cues: "ARTICLE", "SECTION", "district regulations", "permitted uses", "lot area", "setback", "height", "effective date", adoption/enactment language.
+- Example (positive): "ARTICLE VI RESIDENTIAL DISTRICTS ... minimum lot area shall be ..."
+- Do NOT use when: page is clearly proposal/hearing/first-reading only.
+
+2) amendment
+- Use when: page contains enacted text changing an existing zoning ordinance/map/classification.
+- Typical cues: "AN ORDINANCE AMENDING ... ZONING ORDINANCE", "Section X is hereby amended", "rezone from R-1 to C-2".
+- Example (positive): "Section 1. The zoning map is amended to reclassify Parcel ..."
+- Do NOT use when: amendment is only proposed or pending hearing.
+
+3) proposal
+- Use when: zoning legal text is proposed/pending/not yet enacted.
+- Typical cues: "proposed ordinance", "public hearing", "first reading", "considered for final passage", "recommendation".
+- Example (positive): "Notice is hereby given that a public hearing will be held on a proposed amendment ..."
+- Do NOT use when: text states adopted/effective and includes final ordinance clauses.
+
+4) notice
+- Use when: legal/procedural zoning notice with limited substantive rule text.
+- Typical cues: "notice of hearing", "notice of adoption", date/time/place publication notices.
+- Example (positive): "Notice of public hearing before planning commission ..."
+- Do NOT use when: page includes long substantive ordinance clause text (then classify as full_ordinance/amendment/proposal).
+
+5) building_code_or_other_law
+- Use when: verbatim legal text is municipal law but not zoning law.
+- Typical cues: building/electrical/plumbing/fire code adoption; traffic, licensing, utility, bond, fiscal ordinances.
+- Example (positive): "An ordinance adopting the Uniform Building Code ..."
+- Do NOT use when: page clearly regulates zoning districts, permitted land uses, rezoning, or zoning-map changes.
+
+6) zoning_narrative_nonverbatim
+- Use when: page discusses zoning policy/news/debate but does not reproduce legal clauses.
+- Typical cues: reporter narrative, quotes about council actions, summaries without section-level ordinance language.
+- Example (positive): "City council debated zoning changes Tuesday night ..."
+- Do NOT use when: the page includes verbatim ordinance clause text.
+
+7) non_zoning
+- Use when: page has no zoning legal or zoning narrative content.
+- Example: sports, ads, obituaries, national/international news unrelated to zoning.
+
+8) uncertain
+- Use when: OCR is too degraded, content is mixed across incompatible categories, or evidence is insufficient.
+- Use uncertain rather than forcing full_ordinance/amendment.
+
+Page completeness flag (separate from type):
+- page_completeness=partial when this page is only part of the legal object (continuation pages, page starts with "(continued...)", partial article coverage).
+- page_completeness=complete when page appears to carry a full standalone legal publication for that issue date.
+- page_completeness=uncertain when completeness cannot be inferred from page text.
+
+Hard constraints:
+- If proposal/hearing language appears, enactment_status_signal must be proposed or unknown.
+- Do not call full_ordinance unless page shows ordinance-rule language itself (sections/uses/district standards/definitions/provisions).
+- OCR noise is expected; infer from legal structure and cues, not perfect spelling.
+
+Return fields:
+- contains_verbatim_zoning_law_language: yes|no|uncertain
+- is_verbatim_legal_text: yes|no|uncertain
+- legal_object_type: one of the 8 values above
+- page_completeness: partial|complete|uncertain
+- enactment_status_signal: enacted|proposed|unknown
+- confidence_0_to_1: 0..1
+- evidence_quotes: 1-3 short snippets
+- notes: one short sentence
+
+JSON schema example:
+{"page_id": "string", "contains_verbatim_zoning_law_language": "yes", "is_verbatim_legal_text": "yes", "legal_object_type": "full_ordinance", "page_completeness": "partial", "enactment_status_signal": "enacted", "confidence_0_to_1": 0.85, "evidence_quotes": ["short quote 1", "short quote 2"], "notes": "brief rationale"}
+
+Page metadata: page_id={{page_id}} issue_id={{issue_id}} issue_date={{issue_date}} newspaper_slug={{newspaper_slug}}
+
+Page text:
+{{page_text}}
+
+Return JSON now.

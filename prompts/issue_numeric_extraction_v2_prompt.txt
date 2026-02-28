@@ -1,0 +1,204 @@
+You are extracting structured zoning-rule observations from OCR newspaper transcripts for ONE issue.
+
+Input notes:
+- OCR text can contain recognition errors.
+- Work only from the provided issue content.
+- Do not infer trends over time.
+- Do not compare with other issues.
+
+Scope:
+- The issue is already selected for legal/zoning analysis.
+- Return normalized observation rows for numeric and procedural zoning questions.
+
+Hard rules:
+1) Output ONLY valid JSON (no markdown).
+2) Use the schema exactly.
+3) Return zero rows when evidence is absent; do not guess.
+4) Every row must include a verbatim quote and page_id.
+5) Exactly one of value_number or value_category must be populated per row.
+6) Do not emit duplicate rows for the same (question_id, metric, bound_role, district_or_context, value, page_id, quote).
+7) If text is ambiguous, set legal_status="uncertain" and lower confidence.
+8) For all `q_num_sf_*` questions, extract standards for principal single-family residential use only.
+9) Do NOT use accessory-only provisions (garage, servant quarters, accessory building) for principal-use numeric rows.
+10) `q_proc_site_plan_review_explicit` requires explicit site-plan terminology or an explicit development-plan approval requirement beyond a routine building-permit check.
+11) `quote` must be copied exactly from transcript text on the cited page (contiguous substring), not paraphrased.
+12) Do not add ellipses (`...`) or rewrite wording in `quote`; if exact quote cannot be provided, do not emit that row.
+
+Question catalog (issue-level only):
+
+Numeric core (principal single-family):
+- q_num_sf_min_lot_area:
+  Extract minimum lot area for principal single-family use.
+  metric="sf_min_lot_area", unit="sqft".
+
+- q_num_sf_min_lot_width:
+  Extract minimum lot width/frontage for principal single-family use.
+  metric="sf_min_lot_width", unit="ft".
+
+- q_num_sf_front_setback_min:
+  Extract minimum front setback for principal single-family use.
+  metric="sf_front_setback_min", unit="ft".
+
+- q_num_sf_side_setback_min:
+  Extract minimum side setback for principal single-family use.
+  metric="sf_side_setback_min", unit="ft".
+
+- q_num_sf_rear_setback_min:
+  Extract minimum rear setback for principal single-family use.
+  metric="sf_rear_setback_min", unit="ft".
+
+- q_num_sf_max_height_ft:
+  Extract maximum building height in feet for principal single-family contexts if present.
+  metric="sf_max_height_ft", unit="ft".
+
+- q_num_sf_max_height_stories:
+  Extract maximum stories for principal single-family contexts if present.
+  metric="sf_max_height_stories", unit="stories".
+
+- q_num_sf_max_lot_coverage:
+  Extract maximum lot coverage where explicitly numeric.
+  metric="sf_max_lot_coverage", unit="percent".
+
+- q_num_sf_min_floor_area:
+  Extract minimum floor area for principal single-family where explicit.
+  metric="sf_min_floor_area", unit="sqft".
+
+- q_num_sf_parking_spaces_per_dwelling:
+  Extract off-street residential parking minimum per dwelling unit where explicit.
+  metric="sf_parking_spaces_per_dwelling", unit="spaces_per_unit".
+
+Numeric derived bounds (only if issue includes multiple district-specific values):
+- q_num_sf_lot_area_bounds:
+  Return smallest and largest principal single-family lot-area minima in this issue.
+  metric="sf_min_lot_area_issue_bounds", unit="sqft", bound_role in {"smallest_minimum","largest_minimum"}.
+
+- q_num_sf_front_setback_bounds:
+  Return smallest and largest principal single-family front-setback minima in this issue.
+  metric="sf_front_setback_issue_bounds", unit="ft", bound_role in {"smallest_minimum","largest_minimum"}.
+
+- q_num_sf_side_setback_bounds:
+  Return smallest and largest principal single-family side-setback minima in this issue.
+  metric="sf_side_setback_issue_bounds", unit="ft", bound_role in {"smallest_minimum","largest_minimum"}.
+
+Procedural/flexibility:
+- q_proc_permit_conformance_planning_review:
+  Whether permits/licenses for land/building use require planning-body conformance review.
+  metric="permit_conformance_planning_review", unit="none".
+
+- q_proc_site_plan_review_explicit:
+  Whether site plan review is explicitly required.
+  metric="site_plan_review_explicit", unit="none".
+
+- q_proc_subdivision_or_plat_approval:
+  Whether subdivision/plat/new-street approval is required.
+  metric="subdivision_or_plat_approval", unit="none".
+
+- q_proc_use_variance_availability:
+  Whether use variances are available.
+  metric="use_variance_availability", unit="none".
+
+- q_proc_use_variance_decider:
+  Primary decision body for use variances.
+  metric="use_variance_decider", unit="none".
+
+- q_proc_use_variance_standard:
+  Legal standard explicitly stated for use variance.
+  metric="use_variance_standard", unit="none".
+
+- q_proc_area_variance_availability:
+  Whether area/bulk variances are available.
+  metric="area_variance_availability", unit="none".
+
+- q_proc_special_permit_or_conditional_use:
+  Whether special permit / conditional use is required.
+  metric="special_permit_requirement", unit="none".
+
+- q_proc_public_hearing_required:
+  Whether public hearing is required for variance/special-permit/zoning actions in this issue text.
+  metric="public_hearing_requirement", unit="none".
+
+- q_proc_notice_publication_required:
+  Whether published legal notice is required for zoning actions in this issue text.
+  metric="notice_publication_requirement", unit="none".
+
+- q_proc_certificate_of_occupancy:
+  Whether certificate of occupancy/compliance is required.
+  metric="certificate_of_occupancy_requirement", unit="none".
+
+- q_proc_nonconforming_use:
+  Presence of a nonconforming-use framework.
+  metric="nonconforming_use_framework", unit="none".
+
+- q_proc_enforcement_appeals_presence:
+  Presence of enforcement and/or appeals framework.
+  metric="enforcement_appeals_framework", unit="none".
+
+- q_proc_enforcement_penalty:
+  Extract explicit numeric penalty caps.
+  metric in {"max_fine", "max_jail_days"}; unit in {"usd","days"}.
+
+Bound role guidance:
+- Use "single_value" when one district/value is reported.
+- Use "smallest_minimum" and "largest_minimum" only if this issue explicitly states multiple district minima and you are returning aggregated bounds.
+- Use "smallest_maximum" and "largest_maximum" only for maxima where multiple district maxima are explicit.
+- Otherwise prefer district-specific rows with bound_role="single_value".
+
+Allowed enums:
+- bound_role: ["single_value","smallest_minimum","largest_minimum","smallest_maximum","largest_maximum"]
+- legal_status: ["enacted","proposal","uncertain"]
+- unit: ["sqft","ft","stories","percent","spaces_per_unit","du_per_acre","usd","days","none"]
+
+Allowed value_category enums by question_id:
+- q_proc_permit_conformance_planning_review: ["required","not_required","uncertain"]
+- q_proc_site_plan_review_explicit: ["required","not_required","uncertain"]
+- q_proc_subdivision_or_plat_approval: ["required","not_required","uncertain"]
+- q_proc_use_variance_availability: ["available","not_available","uncertain"]
+- q_proc_use_variance_decider: ["zba","board_of_appeals","planning_commission","city_council","court_only","multiple","uncertain"]
+- q_proc_use_variance_standard: ["unnecessary_hardship","practical_difficulty","special_conditions","not_stated","uncertain"]
+- q_proc_area_variance_availability: ["available","not_available","uncertain"]
+- q_proc_special_permit_or_conditional_use: ["required","not_required","uncertain"]
+- q_proc_public_hearing_required: ["required","not_required","uncertain"]
+- q_proc_notice_publication_required: ["required","not_required","uncertain"]
+- q_proc_certificate_of_occupancy: ["required","not_required","uncertain"]
+- q_proc_nonconforming_use: ["present","absent","uncertain"]
+- q_proc_enforcement_appeals_presence: ["present","absent","uncertain"]
+
+JSON output schema:
+{
+  "issue_id": "string",
+  "issue_date": "YYYY-MM-DD",
+  "newspaper_slug": "string",
+  "observations": [
+    {
+      "question_id": "string",
+      "metric": "string",
+      "bound_role": "single_value|smallest_minimum|largest_minimum|smallest_maximum|largest_maximum",
+      "district_or_context": "string",
+      "value_number": 0.0,
+      "value_category": "string",
+      "unit": "sqft|ft|stories|percent|spaces_per_unit|du_per_acre|usd|days|none",
+      "legal_status": "enacted|proposal|uncertain",
+      "page_id": "string",
+      "quote": "string",
+      "confidence_0_to_1": 0.0
+    }
+  ],
+  "notes": [
+    "string"
+  ]
+}
+
+Validation constraints:
+- observations may be empty.
+- value_number must be null when value_category is populated.
+- value_category must be empty when value_number is populated.
+- confidence_0_to_1 must be between 0 and 1.
+- issue_id/issue_date/newspaper_slug must echo provided metadata exactly.
+
+Now extract observations from the issue below.
+
+Issue metadata:
+{{ISSUE_METADATA}}
+
+Issue pages and OCR transcripts:
+{{ISSUE_TEXT}}

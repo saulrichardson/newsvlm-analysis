@@ -5,11 +5,12 @@ Extract zoning-only language from full newspaper panel transcripts.
 This script is designed to clean panel issue_texts by removing unrelated
 newspaper content while preserving zoning ordinance/amendment language.
 
-It supports four methods:
+It supports multiple methods:
   - rules_strict: high precision, lower recall
   - rules_balanced: balanced precision/recall
   - rules_recall: high recall candidate capture
   - llm_hybrid: rules_recall candidates + LLM block-level filtering/cleanup
+  - llm_only: LLM-only block selection over ALL blocks (no deterministic candidate filtering)
 
 Core outputs (under --output-dir / <method>/):
   - issue_zoning_extract.jsonl
@@ -40,7 +41,7 @@ from typing import Any
 import pandas as pd
 
 
-_METHODS = ("rules_strict", "rules_balanced", "rules_recall", "llm_hybrid")
+_METHODS = ("rules_strict", "rules_balanced", "rules_recall", "llm_hybrid", "llm_only")
 _ZONING_LABELS = {"full_ordinance", "amendment_substantial", "amendment_targeted"}
 
 
@@ -161,8 +162,8 @@ def _parse_args() -> argparse.Namespace:
     )
     ap.add_argument(
         "--methods",
-        default="rules_strict,rules_balanced,rules_recall",
-        help="Comma-separated methods to run. Allowed: rules_strict,rules_balanced,rules_recall,llm_hybrid",
+        default="llm_only",
+        help="Comma-separated methods to run. Allowed: rules_strict,rules_balanced,rules_recall,llm_hybrid,llm_only",
     )
     ap.add_argument("--experiment", action="store_true", help="Run all requested methods and produce comparison output.")
     ap.add_argument(
@@ -180,11 +181,23 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--model",
         default="openai:gpt-5-mini",
-        help="Model for llm_hybrid method.",
+        help="Model for llm_hybrid and llm_only methods.",
     )
     ap.add_argument("--llm-max-candidate-blocks", type=int, default=24)
     ap.add_argument("--llm-max-block-chars", type=int, default=2200)
     ap.add_argument("--llm-max-issue-candidate-chars", type=int, default=42000)
+    ap.add_argument(
+        "--llm-only-max-block-chars",
+        type=int,
+        default=0,
+        help="Optional per-block clip (chars) for llm_only prompts. 0 means no clipping.",
+    )
+    ap.add_argument(
+        "--llm-only-max-issue-chars",
+        type=int,
+        default=0,
+        help="Optional total-issue clip (chars) for llm_only prompts. 0 means no clipping.",
+    )
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument(
@@ -715,6 +728,216 @@ def _build_llm_prompt(issue: dict[str, Any], candidates: list[dict[str, Any]]) -
     return "\n".join(lines).strip()
 
 
+def _build_llm_only_prompt(issue: dict[str, Any], blocks: list[str], *, max_block_chars: int) -> str:
+    schema = {
+        "issue_id": _norm_str(issue.get("issue_id")),
+        "pure_block_ids": [0],
+        "mixed_block_ids": [1],
+        "issue_notes": "brief caveat or empty string",
+    }
+    lines: list[str] = []
+    lines.append("You are extracting zoning-regulation language from an OCR newspaper issue transcript.")
+    lines.append("Return ONLY JSON. No markdown.")
+    lines.append("")
+    lines.append("Goal: identify verbatim zoning ordinance / amendment / rezoning legal-notice language.")
+    lines.append("")
+    lines.append("Classify blocks into:")
+    lines.append("- pure: the block is entirely (or almost entirely) verbatim ordinance/amendment/legal-notice text. Keep whole block.")
+    lines.append("- mixed: the block contains some verbatim ordinance/notice lines PLUS some non-ordinance narrative (lead-in/reporting). Keep, but it will be trimmed later.")
+    lines.append("- drop: no verbatim ordinance/amendment/legal-notice language.")
+    lines.append("")
+    lines.append("Verbatim legal/regulatory text includes:")
+    lines.append("- ordinance or amendment text (sections, provisions, 'shall', 'be it ordained', etc.)")
+    lines.append("- legal notice of rezoning / reclassification / zoning map changes")
+    lines.append("- procedural zoning provisions (variances, appeals, permits) when written as ordinance text")
+    lines.append("")
+    lines.append("Exclude blocks that are NOT regulatory text, including:")
+    lines.append("- general news articles, editorials, sports, weather, obituaries, classifieds")
+    lines.append("- legal notices unrelated to zoning (probate, trustee sale, fictitious business name, etc.)")
+    lines.append("- commentary about zoning that does NOT quote ordinance/notice text")
+    lines.append("")
+    lines.append("Important: we want ONLY verbatim ordinance/amendment/legal-notice language in the final corpus.")
+    lines.append("This first step is only to locate candidate blocks; trimming to ordinance-only lines happens later.")
+    lines.append("")
+    lines.append("Parking is zoning-relevant when it is part of requirements/standards (off-street parking, loading, stalls per unit, district rules).")
+    lines.append("")
+    lines.append("Output:")
+    lines.append("- pure_block_ids: list of integer block IDs that are pure verbatim ordinance/notice text")
+    lines.append("- mixed_block_ids: list of integer block IDs that contain some verbatim ordinance/notice text but also narrative")
+    lines.append("- issue_notes: short caveat if uncertain, else empty string")
+    lines.append("")
+    lines.append("JSON schema:")
+    lines.append(json.dumps(schema, ensure_ascii=False))
+    lines.append("")
+    lines.append(
+        f"Issue metadata: issue_id={_norm_str(issue.get('issue_id'))} date={_norm_str(issue.get('issue_date'))} "
+        f"label={_norm_str(issue.get('classification_label'))} city={_norm_str(issue.get('city_name'))},{_norm_str(issue.get('state_abbr')).upper()}"
+    )
+    lines.append("")
+    lines.append("Blocks (split by blank lines):")
+    for i, b in enumerate(blocks):
+        lines.append("")
+        lines.append(f"[BLOCK {int(i)}]")
+        if int(max_block_chars) > 0:
+            lines.append(_clip_for_prompt(b, int(max_block_chars)))
+        else:
+            lines.append(b)
+    lines.append("")
+    lines.append("Return JSON now.")
+    return "\n".join(lines).strip()
+
+
+def _line_number_block(text: str) -> tuple[list[str], str]:
+    """Return (raw_lines, numbered_block_text). Line numbers are 1-based, fixed-width."""
+    raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = raw.split("\n")
+    width = max(3, len(str(len(lines))))
+    out: list[str] = []
+    for i, line in enumerate(lines, start=1):
+        out.append(f"{i:0{width}d}| {line}")
+    return lines, "\n".join(out)
+
+
+def _build_llm_only_trim_prompt(issue: dict[str, Any], blocks: list[dict[str, Any]]) -> str:
+    """
+    Second-stage verbatim trimming.
+
+    Input: candidate blocks (block_id + original text). Each block is line-numbered in the prompt.
+    Output: for each block, line ranges to keep (so reconstruction is verbatim).
+    """
+    schema = {
+        "issue_id": _norm_str(issue.get("issue_id")),
+        "blocks": [{"block_id": 0, "keep_line_ranges": [[1, 1]]}],
+        "issue_notes": "brief caveat or empty string",
+    }
+    lines: list[str] = []
+    lines.append("You are extracting ONLY verbatim zoning ordinance / amendment / rezoning legal-notice text.")
+    lines.append("Return ONLY JSON. No markdown.")
+    lines.append("")
+    lines.append("You will see candidate blocks with line numbers.")
+    lines.append("For each block, choose the line ranges that are verbatim ordinance/amendment/legal-notice language.")
+    lines.append("Do NOT include narrative lead-in or reporting about zoning unless it is itself a legal notice/ordinance line.")
+    lines.append("")
+    lines.append("Rules:")
+    lines.append("- Prefer dropping ambiguous lines rather than keeping extra non-ordinance prose.")
+    lines.append("- Keep headings like 'ORDINANCE NO. 123', 'AN ORDINANCE...', 'BE IT ORDAINED', 'SECTION 1' if part of the legal text.")
+    lines.append("- Keep 'NOTICE OF PUBLIC HEARING' / 'NOTICE OF REZONING' style legal notices when they are formal notice language.")
+    lines.append("- Keep zoning standards and use lists (e.g., 'In an A district no building or land shall be used...').")
+    lines.append("")
+    lines.append("Output format:")
+    lines.append("- blocks: list of {block_id, keep_line_ranges}")
+    lines.append("- keep_line_ranges: list of [start_line, end_line] (1-based, inclusive)")
+    lines.append("- If a block contains NO ordinance/notice lines, return keep_line_ranges as an empty list for that block.")
+    lines.append("")
+    lines.append("JSON schema:")
+    lines.append(json.dumps(schema, ensure_ascii=False))
+    lines.append("")
+    lines.append(
+        f"Issue metadata: issue_id={_norm_str(issue.get('issue_id'))} date={_norm_str(issue.get('issue_date'))} "
+        f"label={_norm_str(issue.get('classification_label'))} city={_norm_str(issue.get('city_name'))},{_norm_str(issue.get('state_abbr')).upper()}"
+    )
+    lines.append("")
+    lines.append("Candidate blocks (line-numbered):")
+    for b in blocks:
+        bid = int(b["block_id"])
+        raw_text = str(b.get("text") or "")
+        _raw_lines, numbered = _line_number_block(raw_text)
+        lines.append("")
+        lines.append(f"[BLOCK {bid}]")
+        lines.append(numbered)
+    lines.append("")
+    lines.append("Return JSON now.")
+    return "\n".join(lines).strip()
+
+
+def _coerce_llm_only_trim_parse(parsed_obj: dict[str, Any], expected_issue_id: str, candidate_ids: set[int], block_line_counts: dict[int, int]) -> dict[str, Any]:
+    out = dict(parsed_obj or {})
+    out_issue = _norm_str(out.get("issue_id")) or expected_issue_id
+    notes = _norm_str(out.get("issue_notes"))
+    blocks_raw = out.get("blocks")
+    blocks_out: list[dict[str, Any]] = []
+    if isinstance(blocks_raw, list):
+        for b in blocks_raw:
+            if not isinstance(b, dict):
+                continue
+            try:
+                bid = int(b.get("block_id"))
+            except Exception:
+                continue
+            if bid not in candidate_ids:
+                continue
+            ranges_raw = b.get("keep_line_ranges")
+            keep_ranges: list[list[int]] = []
+            if isinstance(ranges_raw, list):
+                for rr in ranges_raw:
+                    if not isinstance(rr, list) or len(rr) != 2:
+                        continue
+                    try:
+                        s = int(rr[0])
+                        e = int(rr[1])
+                    except Exception:
+                        continue
+                    if s <= 0 or e <= 0:
+                        continue
+                    if s > e:
+                        s, e = e, s
+                    max_line = int(block_line_counts.get(bid, 0) or 0)
+                    if max_line and (s > max_line or e > max_line):
+                        continue
+                    keep_ranges.append([s, e])
+            blocks_out.append({"block_id": bid, "keep_line_ranges": keep_ranges})
+    return {"issue_id": out_issue, "blocks": blocks_out, "issue_notes": notes}
+
+
+def _coerce_llm_only_issue_parse(parsed_obj: dict[str, Any], expected_issue_id: str, n_blocks: int) -> dict[str, Any]:
+    out = dict(parsed_obj or {})
+    out_issue = _norm_str(out.get("issue_id")) or expected_issue_id
+
+    def _coerce_id_list(val: Any) -> list[int]:
+        ids: list[int] = []
+        if isinstance(val, list):
+            for x in val:
+                try:
+                    v = int(x)
+                except Exception:
+                    continue
+                if v < 0 or v >= int(n_blocks):
+                    continue
+                if v not in ids:
+                    ids.append(v)
+        return ids
+
+    pure_ids = _coerce_id_list(out.get("pure_block_ids"))
+    mixed_ids = _coerce_id_list(out.get("mixed_block_ids"))
+    kept_ids_raw = out.get("kept_block_ids")
+    if kept_ids_raw is None:
+        kept_ids_raw = out.get("keep_block_ids")
+    kept_ids = _coerce_id_list(kept_ids_raw)
+
+    # Back-compat / robustness:
+    # - If pure/mixed are missing but kept ids exist, treat as mixed.
+    # - If pure is present but kept contains additional ids, treat unclassified kept ids as mixed.
+    if kept_ids:
+        if (not pure_ids and not mixed_ids):
+            mixed_ids = list(kept_ids)
+        else:
+            known = set(pure_ids) | set(mixed_ids)
+            extras = [x for x in kept_ids if x not in known]
+            if extras:
+                mixed_ids = sorted(set(mixed_ids) | set(extras))
+
+    # Final kept ids are union.
+    kept_union: list[int] = sorted(set(pure_ids) | set(mixed_ids) | set(kept_ids))
+    notes = _norm_str(out.get("issue_notes"))
+    return {
+        "issue_id": out_issue,
+        "pure_block_ids": sorted(pure_ids),
+        "mixed_block_ids": sorted(mixed_ids),
+        "kept_block_ids": kept_union,
+        "issue_notes": notes,
+    }
+
+
 def _build_llm_candidate_blocks(
     issue: dict[str, Any],
     recall_extract: dict[str, Any],
@@ -977,6 +1200,290 @@ def _run_method_llm_hybrid(
     return issue_rows, pd.DataFrame(metric_rows)
 
 
+def _run_method_llm_only(
+    *,
+    city_issues: list[dict[str, Any]],
+    out_dir: Path,
+    model: str,
+    llm_only_max_block_chars: int,
+    llm_only_max_issue_chars: int,
+    gateway_runner: Path,
+    gateway_pythonpath: Path | None,
+    timeout_s: float,
+    concurrency: int,
+    gov_env_path: Path,
+    skip_existing: bool,
+    dry_run: bool,
+) -> tuple[list[dict[str, Any]], pd.DataFrame]:
+    # Two-stage LLM-only extraction:
+    #   Pass 1: identify candidate blocks containing any verbatim ordinance/notice language.
+    #   Pass 2: within those blocks, select exact line ranges that are ordinance/notice (verbatim).
+
+    pass1_req_rows: list[tuple[str, str]] = []
+    issue_meta: dict[str, dict[str, Any]] = {}
+    for issue in city_issues:
+        issue_id = _norm_str(issue.get("issue_id"))
+        cid = f"zoning_extract_llm_only_pass1::{_norm_str(issue.get('city_key'))}::{issue_id}"
+        blocks = _split_blocks(_norm_str(issue.get("text")))
+        # If the issue is very large and a total budget is provided, clip blocks (but do not drop blocks).
+        issue_chars = sum(len(b) for b in blocks)
+        max_block_chars = int(llm_only_max_block_chars)
+        if int(llm_only_max_issue_chars) > 0 and issue_chars > int(llm_only_max_issue_chars) and blocks:
+            per_block = max(400, int(int(llm_only_max_issue_chars) // max(1, len(blocks))))
+            if max_block_chars <= 0 or per_block < max_block_chars:
+                max_block_chars = per_block
+        prompt = _build_llm_only_prompt(issue, blocks, max_block_chars=int(max_block_chars))
+        pass1_req_rows.append((cid, prompt))
+        issue_meta[cid] = {"issue": issue, "blocks": blocks}
+
+    pass1_dir = out_dir / "pass1"
+    pass1_req_path = pass1_dir / "requests" / "openai_requests_shard000.jsonl"
+    _write_openai_requests(pass1_req_path, pass1_req_rows, model=model)
+    _run_gateway_requests(
+        request_dir=pass1_req_path.parent,
+        output_dir=pass1_dir / "results",
+        runner_path=gateway_runner,
+        model=model,
+        gateway_pythonpath=gateway_pythonpath,
+        timeout_s=timeout_s,
+        concurrency=concurrency,
+        gov_env_path=gov_env_path,
+        skip_existing=skip_existing,
+        dry_run=dry_run,
+    )
+
+    pass1_result_map = _read_result_jsonl(pass1_dir / "results")
+    pass1_error_map = _read_error_jsonl(pass1_dir / "results")
+
+    # Collect candidate block IDs per issue.
+    issue_candidates: dict[str, dict[str, Any]] = {}
+    for cid, _prompt in pass1_req_rows:
+        issue = issue_meta[cid]["issue"]
+        blocks = issue_meta[cid]["blocks"]
+
+        output_text = ""
+        if cid in pass1_result_map:
+            body = (((pass1_result_map[cid].get("response") or {}).get("body")) or {})
+            output_text = _extract_openai_output_text(body if isinstance(body, dict) else {})
+        elif cid in pass1_error_map:
+            body = (((pass1_error_map[cid].get("response") or {}).get("body")) or {})
+            output_text = _norm_str((((body.get("error") or {}).get("message")) if isinstance(body, dict) else ""))
+
+        parsed = _parse_json_from_text(output_text)
+        parse_valid = isinstance(parsed, dict) and bool(parsed)
+        kept_block_ids: list[int] = []
+        pure_block_ids: list[int] = []
+        mixed_block_ids: list[int] = []
+        notes = ""
+        if parse_valid and isinstance(parsed, dict):
+            p = _coerce_llm_only_issue_parse(parsed, expected_issue_id=_norm_str(issue.get("issue_id")), n_blocks=len(blocks))
+            notes = _norm_str(p.get("issue_notes"))
+            kept_block_ids = sorted({int(x) for x in (p.get("kept_block_ids") or []) if isinstance(x, int)})
+            pure_block_ids = sorted({int(x) for x in (p.get("pure_block_ids") or []) if isinstance(x, int)})
+            mixed_block_ids = sorted({int(x) for x in (p.get("mixed_block_ids") or []) if isinstance(x, int)})
+        issue_candidates[_norm_str(issue.get("issue_id"))] = {
+            "city_key": _norm_str(issue.get("city_key")),
+            "issue": issue,
+            "blocks": blocks,
+            "pass1_parse_valid": int(bool(parse_valid)),
+            "pass1_notes": notes,
+            "candidate_block_ids": kept_block_ids,
+            "pure_block_ids": pure_block_ids,
+            "mixed_block_ids": mixed_block_ids,
+        }
+
+    # Pass 2: trim to ordinance-only line ranges within candidate blocks.
+    pass2_req_rows: list[tuple[str, str]] = []
+    pass2_meta: dict[str, dict[str, Any]] = {}
+    for issue_id, meta in issue_candidates.items():
+        # Only mixed blocks require line-level trimming.
+        mixed_ids: list[int] = list(meta.get("mixed_block_ids") or [])
+        if not mixed_ids:
+            continue
+        issue = meta["issue"]
+        blocks = meta["blocks"]
+        cand_blocks: list[dict[str, Any]] = []
+        block_line_counts: dict[int, int] = {}
+        for bid in mixed_ids:
+            if bid < 0 or bid >= len(blocks):
+                continue
+            txt = _norm_str(blocks[bid])
+            if not txt:
+                continue
+            raw_lines, _numbered = _line_number_block(txt)
+            block_line_counts[int(bid)] = int(len(raw_lines))
+            cand_blocks.append({"block_id": int(bid), "text": txt})
+        if not cand_blocks:
+            continue
+        cid2 = f"zoning_extract_llm_only_pass2::{_norm_str(issue.get('city_key'))}::{issue_id}"
+        prompt2 = _build_llm_only_trim_prompt(issue, cand_blocks)
+        pass2_req_rows.append((cid2, prompt2))
+        pass2_meta[cid2] = {
+            "issue": issue,
+            "blocks": blocks,
+            "candidate_ids": set(int(x) for x in mixed_ids),
+            "block_line_counts": block_line_counts,
+        }
+
+    pass2_dir = out_dir / "pass2"
+    pass2_req_path = pass2_dir / "requests" / "openai_requests_shard000.jsonl"
+    _write_openai_requests(pass2_req_path, pass2_req_rows, model=model)
+    _run_gateway_requests(
+        request_dir=pass2_req_path.parent,
+        output_dir=pass2_dir / "results",
+        runner_path=gateway_runner,
+        model=model,
+        gateway_pythonpath=gateway_pythonpath,
+        timeout_s=timeout_s,
+        concurrency=concurrency,
+        gov_env_path=gov_env_path,
+        skip_existing=skip_existing,
+        dry_run=dry_run,
+    )
+
+    pass2_result_map = _read_result_jsonl(pass2_dir / "results")
+    pass2_error_map = _read_error_jsonl(pass2_dir / "results")
+
+    # Index pass2 parse by issue_id for easy join.
+    pass2_by_issue: dict[str, dict[str, Any]] = {}
+    for cid2, _prompt2 in pass2_req_rows:
+        meta2 = pass2_meta[cid2]
+        issue = meta2["issue"]
+        issue_id = _norm_str(issue.get("issue_id"))
+        output_text = ""
+        if cid2 in pass2_result_map:
+            body = (((pass2_result_map[cid2].get("response") or {}).get("body")) or {})
+            output_text = _extract_openai_output_text(body if isinstance(body, dict) else {})
+        elif cid2 in pass2_error_map:
+            body = (((pass2_error_map[cid2].get("response") or {}).get("body")) or {})
+            output_text = _norm_str((((body.get("error") or {}).get("message")) if isinstance(body, dict) else ""))
+        parsed = _parse_json_from_text(output_text)
+        parse_valid = isinstance(parsed, dict) and bool(parsed)
+        if parse_valid and isinstance(parsed, dict):
+            p2 = _coerce_llm_only_trim_parse(
+                parsed,
+                expected_issue_id=issue_id,
+                candidate_ids=set(meta2["candidate_ids"]),
+                block_line_counts=meta2["block_line_counts"],
+            )
+            pass2_by_issue[issue_id] = {"parse_valid": 1, "parsed": p2}
+        else:
+            pass2_by_issue[issue_id] = {"parse_valid": 0, "parsed": None}
+
+    # Build final issue rows and metrics.
+    issue_rows: list[dict[str, Any]] = []
+    metric_rows: list[dict[str, Any]] = []
+
+    # Preserve original city issue order for stable outputs.
+    for issue in city_issues:
+        issue_id = _norm_str(issue.get("issue_id"))
+        meta = issue_candidates.get(issue_id) or {"candidate_block_ids": [], "pass1_parse_valid": 0, "pass1_notes": ""}
+        blocks = _split_blocks(_norm_str(issue.get("text")))
+        cand_ids = list(meta.get("candidate_block_ids") or [])
+        pure_ids = list(meta.get("pure_block_ids") or [])
+        mixed_ids = list(meta.get("mixed_block_ids") or [])
+
+        kept_blocks: list[dict[str, Any]] = []
+        kept_block_ids: list[int] = []
+        kept_line_ranges_by_block: dict[int, list[list[int]]] = {}
+
+        p2 = pass2_by_issue.get(issue_id) or {}
+        p2_valid = int(p2.get("parse_valid") or 0)
+        p2_parsed = p2.get("parsed") if isinstance(p2, dict) else None
+        p2_notes = ""
+        if isinstance(p2_parsed, dict):
+            p2_notes = _norm_str(p2_parsed.get("issue_notes"))
+
+        # 1) Keep pure verbatim blocks as-is (verbatim).
+        for bid in sorted({int(x) for x in pure_ids if isinstance(x, int)}):
+            if bid < 0 or bid >= len(blocks):
+                continue
+            txt = _norm_str(blocks[bid])
+            if not txt:
+                continue
+            kept_block_ids.append(int(bid))
+            kept_blocks.append({"block_id": int(bid), "keep_line_ranges": [], "text": txt})
+
+        # 2) Trim mixed blocks to ordinance-only lines using pass2 output.
+        if p2_valid and isinstance(p2_parsed, dict):
+            blocks_out = p2_parsed.get("blocks") or []
+            if isinstance(blocks_out, list):
+                for b in blocks_out:
+                    if not isinstance(b, dict):
+                        continue
+                    try:
+                        bid = int(b.get("block_id"))
+                    except Exception:
+                        continue
+                    ranges = b.get("keep_line_ranges") or []
+                    if not isinstance(ranges, list) or not ranges:
+                        continue
+                    if bid < 0 or bid >= len(blocks):
+                        continue
+                    raw_lines = str(blocks[bid] or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                    kept_lines: list[str] = []
+                    keep_ranges: list[list[int]] = []
+                    for rr in ranges:
+                        if not isinstance(rr, list) or len(rr) != 2:
+                            continue
+                        try:
+                            s = int(rr[0])
+                            e = int(rr[1])
+                        except Exception:
+                            continue
+                        if s <= 0 or e <= 0:
+                            continue
+                        if s > e:
+                            s, e = e, s
+                        if s > len(raw_lines) or e > len(raw_lines):
+                            continue
+                        keep_ranges.append([s, e])
+                        kept_lines.extend(raw_lines[s - 1 : e])
+                    text = "\n".join([x for x in kept_lines]).strip()
+                    if not text:
+                        continue
+                    kept_block_ids.append(int(bid))
+                    kept_line_ranges_by_block[int(bid)] = keep_ranges
+                    kept_blocks.append({"block_id": int(bid), "keep_line_ranges": keep_ranges, "text": text})
+
+        # If pass2 fails or yields nothing, leave empty rather than re-introducing narrative.
+        # Sort kept blocks by their original order.
+        kept_blocks = sorted(kept_blocks, key=lambda x: int(x.get("block_id") or 0))
+        kept_block_ids = [int(x.get("block_id")) for x in kept_blocks if isinstance(x, dict) and isinstance(x.get("block_id"), int)]
+        zoning_text = "\n\n".join([_norm_str(x.get("text")) for x in kept_blocks if _norm_str(x.get("text"))]).strip()
+        llm_issue_notes = "\n".join([x for x in [_norm_str(meta.get("pass1_notes")), _norm_str(p2_notes)] if x]).strip()
+
+        issue_rows.append(
+            {
+                "method": "llm_only",
+                "city_key": _norm_str(issue.get("city_key")),
+                "issue_id": issue_id,
+                "issue_date": _norm_str(issue.get("issue_date")),
+                "classification_label": _norm_str(issue.get("classification_label")),
+                "candidate_block_ids": [int(x) for x in cand_ids],
+                "kept_block_ids": [int(x) for x in kept_block_ids],
+                "kept_blocks": kept_blocks,
+                "zoning_text": zoning_text,
+                "llm_issue_notes": llm_issue_notes,
+                "llm_pass1_parse_valid": int(meta.get("pass1_parse_valid") or 0),
+                "llm_pass2_parse_valid": int(p2_valid),
+                "fallback_used": 0,
+            }
+        )
+        metric_rows.append(
+            _metric_row_from_issue(
+                issue,
+                zoning_text,
+                method="llm_only",
+                used_llm=True,
+                llm_parse_valid=bool(int(meta.get("pass1_parse_valid") or 0) and int(p2_valid)),
+                fallback_used=False,
+            )
+        )
+
+    return issue_rows, pd.DataFrame(metric_rows)
+
+
 def _build_city_metrics(issue_metrics: pd.DataFrame, min_zoning_issue_kept_chars: int) -> pd.DataFrame:
     if issue_metrics.empty:
         return pd.DataFrame()
@@ -1106,6 +1613,8 @@ def _build_provenance(args: argparse.Namespace, run_dir: Path, out_dir: Path, ci
             "llm_max_candidate_blocks": int(args.llm_max_candidate_blocks),
             "llm_max_block_chars": int(args.llm_max_block_chars),
             "llm_max_issue_candidate_chars": int(args.llm_max_issue_candidate_chars),
+            "llm_only_max_block_chars": int(args.llm_only_max_block_chars),
+            "llm_only_max_issue_chars": int(args.llm_only_max_issue_chars),
             "concurrency": int(args.concurrency),
             "timeout": float(args.timeout),
             "min_zoning_issue_kept_chars": int(args.min_zoning_issue_kept_chars),
@@ -1169,6 +1678,21 @@ def main() -> None:
                     llm_max_candidate_blocks=int(args.llm_max_candidate_blocks),
                     llm_max_block_chars=int(args.llm_max_block_chars),
                     llm_max_issue_chars=int(args.llm_max_issue_candidate_chars),
+                    gateway_runner=gateway_runner,
+                    gateway_pythonpath=gateway_pythonpath,
+                    timeout_s=float(args.timeout),
+                    concurrency=int(args.concurrency),
+                    gov_env_path=gov_env_path,
+                    skip_existing=bool(args.skip_existing),
+                    dry_run=bool(args.dry_run),
+                )
+            elif method == "llm_only":
+                city_issue_rows, city_issue_df = _run_method_llm_only(
+                    city_issues=issues,
+                    out_dir=method_out / "llm" / city_key,
+                    model=str(args.model),
+                    llm_only_max_block_chars=int(args.llm_only_max_block_chars),
+                    llm_only_max_issue_chars=int(args.llm_only_max_issue_chars),
                     gateway_runner=gateway_runner,
                     gateway_pythonpath=gateway_pythonpath,
                     timeout_s=float(args.timeout),

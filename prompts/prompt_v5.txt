@@ -1,0 +1,120 @@
+You are given OCR text from a historical newspaper. The page can contain lots of unrelated “noise” (ads, classifieds, sports, obituaries, headlines, page furniture). That is expected.
+
+Your job is NOT to decide whether the ordinance dominates the page. Your job IS to decide whether the page contains ANY content of interest: VERBATIM zoning-law text (printed ordinance/code language) and, if present, characterize what it is and whether it appears enacted vs proposed.
+
+Precision-first: be conservative about calling something “enacted” or “comprehensive.” If ambiguous or OCR is too degraded, use “uncertain” and enactment_status_signal="unknown".
+
+Return ONLY valid JSON. No markdown. No extra text.
+Evidence quotes must be exact substrings from page_text (best effort under OCR noise). Do not invent details.
+
+INPUTS
+Page metadata:
+page_id={{page_id}} issue_id={{issue_id}} issue_date={{issue_date}} newspaper_slug={{newspaper_slug}}
+
+Page text (OCR):
+{{page_text}}
+
+CORE METHODOLOGY (do real reading, ignore noise)
+1) Scan the ENTIRE page text and separate “items” mentally: ads/news/legal notices/ordinance blocks. Do not assume the biggest item is the most relevant.
+2) Actively search for any block that looks like law speaking in its own voice (ordinance/code drafting), even if it is only a small portion of the page.
+3) If you find verbatim legal text, decide whether it is zoning/land-use law vs other municipal law.
+4) If it is zoning legal text, decide what kind of zoning legal publication it is (ordinance vs amendment/rezoning vs procedural notice).
+5) Separately judge enactment status (enacted vs proposed vs unknown) using only evidence tied to the same zoning legal item.
+6) Separately judge ordinance scope (comprehensive citywide code vs noncomprehensive) if and only if the item is an ordinance.
+7) Separately flag fragment/completeness. Small snippets count as “present,” but should usually be marked fragment or noted as partial.
+
+If multiple zoning-legal items appear on the same page:
+- The page should still be marked as containing zoning legal text.
+- For the single page_class output, choose the item that best represents the MOST “target-relevant” zoning legal content present (closest to enacted ordinance text). Mention in notes if other zoning-legal items are also present.
+
+DEFINITIONS (interpret substantively, not as a keyword game)
+A) Verbatim legal text (ordinance/code language):
+Text drafted as law itself (formal structure/voice), not a reporter summary. It typically reads like provisions that could be codified.
+Examples of what this can look like: “AN ORDINANCE…”, “BE IT ORDAINED…”, “SECTION…”, “shall…”, “is hereby amended…”, definitions, penalties, effective date, mayor/clerk attestation.
+
+B) Zoning legal domain:
+Legal text regulating land use by districts/zones, permitted/conditional uses, dimensional standards (setbacks/yards/height/lot area), zoning map or rezoning, nonconforming uses, zoning administration/enforcement. Historical phrasing varies (use-district, height district, area district, residence/business/industrial districts).
+
+Not zoning (other law): building/electrical/plumbing/fire codes; traffic/parking; licensing; budgets/taxes/bonds; utilities; elections; procurement; personnel; general ordinances without land-use zoning content.
+
+C) Enactment status:
+- Enacted means evidence that the ordinance/amendment was adopted/passed/approved/ordained as law (often with “passed/adopted/approved,” signatures/attestation, final passage, operative effective date in an adoption context).
+- Proposed means the text is framed as pending (public hearing notice, introduced/first reading, will consider, conditional “if adopted,” future hearing date).
+- Unknown means you cannot reliably determine enacted vs proposed.
+
+IMPORTANT: If the same zoning legal item is framed as proposed/pending/hearing notice, do not label it enacted. If you cannot resolve conflicts confidently due to OCR, use unknown.
+
+OUTPUT FIELDS (REQUIRED)
+Return one JSON object with:
+{
+  "page_id": "string",
+
+  "is_verbatim_legal_text": "yes|no|uncertain",
+  "zoning_legal_text_presence": "yes|no|uncertain",
+  "zoning_legal_domain": "zoning|other_law|none|uncertain",
+
+  "zoning_legal_document_form": "ordinance|amendment_or_rezoning|legal_notice|uncertain|n/a",
+  "ordinance_scope_signal": "comprehensive_citywide_code|noncomprehensive_zoning_ordinance|unknown|n/a",
+
+  "enactment_status_signal": "enacted|proposed|unknown",
+  "enactment_evidence_strength": "strong|moderate|weak|none",
+
+  "is_fragment": "yes|no|uncertain|n/a",
+
+  "page_class": "zoning_ordinance_comprehensive|zoning_ordinance_noncomprehensive|zoning_amendment_or_rezoning|zoning_legal_notice|building_code_or_other_law|zoning_narrative_nonverbatim|non_zoning|uncertain",
+
+  "confidence_0_to_1": 0.0-1.0,
+  "evidence_quotes": ["1-3 short exact snippets from page_text"],
+  "notes": "one short sentence explaining what was found and why it was classified that way"
+}
+
+HOW TO SET FIELDS (judgment-based, not checklists)
+1) is_verbatim_legal_text:
+- yes if you find any ordinance/code-like drafting language anywhere on the page.
+- no if the page contains only narrative/summaries/discussion with no drafted provisions.
+- uncertain if OCR prevents a reliable call.
+
+2) zoning_legal_text_presence:
+- yes if any verbatim zoning-law language appears anywhere on the page (even a small block).
+- no if there is no verbatim zoning-law language (even if zoning is discussed).
+- uncertain if you cannot tell due to OCR.
+
+3) zoning_legal_domain:
+- zoning if the verbatim legal text governs land use zoning.
+- other_law if the verbatim legal text is clearly non-zoning.
+- none if there is no verbatim legal text.
+- uncertain if unclear.
+
+4) zoning_legal_document_form (only when domain=zoning):
+- ordinance if it publishes operative zoning rules as an ordinance/code.
+- amendment_or_rezoning if it changes an existing zoning ordinance or zoning map or rezones parcels/areas.
+- legal_notice if it is primarily a notice about hearings/adoption/procedure with limited substantive rule text.
+- uncertain if unclear.
+
+5) ordinance_scope_signal (only when form=ordinance):
+- comprehensive_citywide_code if it appears to establish a broad zoning scheme for the city (district system + substantial rules).
+- noncomprehensive_zoning_ordinance if it is zoning-legal but narrower than a full citywide code.
+- unknown if unclear from the OCR/snippet.
+
+6) enactment_status_signal:
+- enacted only with affirmative evidence tied to the same zoning legal item.
+- proposed when framed as pending/hearing/introduced/conditional/future consideration.
+- unknown when evidence is missing or unreliable/conflicted.
+
+7) is_fragment:
+- yes when the relevant zoning legal text appears cut off, continued, excerpted, or clearly partial.
+- no when the relevant item appears self-contained on the page.
+- uncertain when you cannot tell.
+- n/a when no legal item exists.
+
+8) page_class:
+- If zoning_legal_text_presence=yes, pick the class matching the most relevant zoning legal item found.
+- If no verbatim legal text but zoning discussion exists: zoning_narrative_nonverbatim.
+- If no zoning relevance: non_zoning.
+- Use uncertain if ambiguity is substantial.
+
+Evidence quotes:
+- Choose snippets that directly show (a) ordinance/code voice, (b) zoning nature, and (c) enacted/proposed context where possible.
+- Do not quote irrelevant ads/headlines.
+
+Now classify the page. Return ONLY JSON.

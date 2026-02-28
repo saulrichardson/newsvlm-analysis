@@ -96,8 +96,8 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--max-panel-chars",
         type=int,
-        default=700000,
-        help="Panel char budget before deterministic clipping fallback.",
+        default=0,
+        help="Hard cap for panel text in a single prompt. 0 means no local cap. If positive and exceeded, the run fails (no clipping fallback).",
     )
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=180.0)
@@ -565,17 +565,6 @@ def _as_issue_id_list(v: Any) -> list[str]:
     return out
 
 
-def _clip_issue_text(text: str, per_issue_budget: int) -> tuple[str, bool]:
-    t = str(text or "")
-    if len(t) <= per_issue_budget:
-        return t, False
-    head = int(round(0.7 * per_issue_budget))
-    head = max(1, min(head, per_issue_budget - 1))
-    tail = per_issue_budget - head
-    clipped = t[:head] + "\n\n[... clipped ...]\n\n" + t[-tail:]
-    return clipped, True
-
-
 def _panel_prompt(
     *,
     city_key: str,
@@ -587,8 +576,13 @@ def _panel_prompt(
     issues_sorted = sorted(issues, key=lambda r: (_norm_str(r.get("issue_date")), _norm_str(r.get("issue_id"))))
     n = len(issues_sorted)
     panel_chars_original = sum(len(_norm_str(r.get("text"))) for r in issues_sorted)
-    overflow = panel_chars_original > int(max_panel_chars)
-    per_issue_budget = max(6000, int(math.floor(int(max_panel_chars) / max(1, n))))
+    if int(max_panel_chars) > 0 and panel_chars_original > int(max_panel_chars):
+        raise ValueError(
+            f"city_key={city_key} panel chars {panel_chars_original} exceeds hard cap {int(max_panel_chars)}. "
+            "Clipping fallback is disabled; increase --max-panel-chars or reduce scope."
+        )
+    overflow = False
+    per_issue_budget = 0
 
     cat_template = {
         k: {"early_share": 0.0, "mid_share": 0.0, "late_share": 0.0, "direction": "flat"}
@@ -690,10 +684,6 @@ def _panel_prompt(
         txt_chars = int(r.get("text_chars") or len(txt) or 0)
         used = txt
         clipped = False
-        if overflow:
-            used, clipped = _clip_issue_text(txt, per_issue_budget)
-        if clipped:
-            clipped_n += 1
         panel_chars_used += len(used)
         lines.append("")
         lines.append(

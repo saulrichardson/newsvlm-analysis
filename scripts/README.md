@@ -12,6 +12,8 @@ Scripts are organized by naming convention so workflows are easy to locate:
 Notable entrypoints:
 
 - `scripts/extract_zoning_text_from_panels.py`: build zoning-only corpora from full newspaper panel transcripts (rules + optional LLM hybrid).
+  - Supports an `llm_only` mode (no deterministic candidate filtering): the LLM selects which transcript blocks to keep, then the script stitches those original blocks into a zoning-only corpus.
+- `scripts/build_geo_backbone_crosswalk.py`: construct a robust Census geography backbone for each city panel (place/tract/county/PUMA/ZCTA/UA/CBSA plus 2010↔2020 crosswalks with weights).
 
 Recommended workflow:
 

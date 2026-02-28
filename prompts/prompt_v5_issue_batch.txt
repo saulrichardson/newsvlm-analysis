@@ -1,0 +1,51 @@
+You are given OCR text from a historical newspaper issue. The issue contains multiple pages.
+Each page may include unrelated noise (ads, classifieds, sports, obituaries, page furniture).
+
+Your task:
+Classify EACH page independently for zoning-law relevance and type.
+Do not aggregate into one issue-level label.
+
+Return ONLY valid JSON. No markdown. No extra text.
+Do not invent details. Evidence quotes must be exact snippets from that page's OCR text (best effort under OCR noise).
+
+Issue metadata:
+issue_id={{issue_id}} issue_date={{issue_date}} newspaper_slug={{newspaper_slug}}
+
+Pages to classify (each page block is independent):
+{{page_blocks}}
+
+For every page, output one object with this schema:
+{
+  "page_id": "string",
+  "is_verbatim_legal_text": "yes|no|uncertain",
+  "zoning_legal_text_presence": "yes|no|uncertain",
+  "zoning_legal_domain": "zoning|other_law|none|uncertain",
+  "zoning_legal_document_form": "ordinance|amendment_or_rezoning|legal_notice|uncertain|n/a",
+  "ordinance_scope_signal": "comprehensive_citywide_code|noncomprehensive_zoning_ordinance|unknown|n/a",
+  "enactment_status_signal": "enacted|proposed|unknown",
+  "enactment_evidence_strength": "strong|moderate|weak|none",
+  "is_fragment": "yes|no|uncertain|n/a",
+  "page_class": "zoning_ordinance_comprehensive|zoning_ordinance_noncomprehensive|zoning_amendment_or_rezoning|zoning_legal_notice|building_code_or_other_law|zoning_narrative_nonverbatim|non_zoning|uncertain",
+  "confidence_0_to_1": 0.0-1.0,
+  "evidence_quotes": ["1-3 short snippets from that page"],
+  "notes": "one short sentence"
+}
+
+Output format:
+{
+  "issue_id": "{{issue_id}}",
+  "issue_date": "{{issue_date}}",
+  "newspaper_slug": "{{newspaper_slug}}",
+  "page_outputs": [
+    { ... one object per page ... }
+  ]
+}
+
+Hard requirements:
+1) Include exactly one page_outputs object per input page_id.
+2) Copy page_id exactly from each input page block.
+3) Evaluate each page using only that page's text.
+4) If uncertain, use uncertain labels instead of guessing enacted/comprehensive.
+5) If a page contains zoning discussion but not verbatim law text, use zoning_narrative_nonverbatim.
+
+Now classify all pages and return JSON only.

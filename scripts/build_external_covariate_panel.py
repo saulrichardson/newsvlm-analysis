@@ -4,6 +4,10 @@ Build place/county covariate panel aligned to selected city panels.
 
 Outputs:
   - covariates/city_place_crosswalk.csv
+  - covariates/city_place_match_candidates.csv
+  - covariates/city_place_match_summary.csv
+  - covariates/city_place_unmatched.csv
+  - covariates/manual_place_overrides_template.csv
   - covariates/city_county_crosswalk.csv
   - covariates/city_year_external_covariates.csv
   - covariates/covariate_missingness_report.csv
@@ -104,6 +108,15 @@ _PLACE_SUFFIXES = (
     "cdp",
 )
 
+_MATCH_TOKEN_EQUIV = (
+    ("saint", "st"),
+    ("st", "saint"),
+    ("mount", "mt"),
+    ("mt", "mount"),
+    ("fort", "ft"),
+    ("ft", "fort"),
+)
+
 _ACS_PLACE_VARS = [
     "B01003_001E",  # population
     "B25001_001E",  # housing units
@@ -151,7 +164,7 @@ def _to_int(v: Any) -> int | None:
         return None
 
 
-def _canonical_place_name(name: str) -> str:
+def _normalize_place_text(name: str) -> str:
     s = str(name or "").strip().lower()
     if not s:
         return ""
@@ -160,11 +173,107 @@ def _canonical_place_name(name: str) -> str:
     s = re.sub(r"\(.*?\)", " ", s)
     s = re.sub(r"[^a-z0-9 ]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _strip_place_suffix_once(name: str) -> str:
+    s = str(name or "").strip()
+    if not s:
+        return ""
     for suf in sorted(_PLACE_SUFFIXES, key=len, reverse=True):
         if s.endswith(" " + suf):
-            s = s[: -len(suf) - 1].strip()
-    s = s.replace("saint ", "st ")
+            return s[: -len(suf) - 1].strip()
     return s
+
+
+def _strip_place_suffix_all(name: str) -> str:
+    prev = ""
+    cur = str(name or "").strip()
+    while cur and cur != prev:
+        prev = cur
+        cur = _strip_place_suffix_once(cur)
+    return cur
+
+
+def _name_alias_variants(name: str) -> list[str]:
+    s = str(name or "").strip()
+    if not s:
+        return []
+    out: list[str] = []
+    for src, dst in _MATCH_TOKEN_EQUIV:
+        pat = re.compile(rf"\b{re.escape(src)}\b")
+        if pat.search(s):
+            alt = pat.sub(dst, s)
+            if alt and alt != s:
+                out.append(alt)
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for v in out:
+        if v not in seen:
+            seen.add(v)
+            uniq.append(v)
+    return uniq
+
+
+def _build_name_variants(name: str) -> dict[str, Any]:
+    raw = _normalize_place_text(name)
+    strip1 = _strip_place_suffix_once(raw)
+    stripall = _strip_place_suffix_all(raw)
+
+    keys = [raw, strip1, stripall]
+    keys.extend(_name_alias_variants(raw))
+    keys.extend(_name_alias_variants(strip1))
+    keys.extend(_name_alias_variants(stripall))
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for k in keys:
+        kk = str(k or "").strip()
+        if not kk or kk in seen:
+            continue
+        seen.add(kk)
+        ordered.append(kk)
+
+    token_sets = [set(x.split()) for x in ordered if x]
+    return {
+        "raw": raw,
+        "strip1": strip1,
+        "stripall": stripall,
+        "keys": ordered,
+        "token_sets": token_sets,
+    }
+
+
+def _best_name_similarity(ref_keys: list[str], cand_keys: list[str]) -> float:
+    best = 0.0
+    for a in ref_keys:
+        for b in cand_keys:
+            if not a or not b:
+                continue
+            best = max(best, float(SequenceMatcher(None, a, b).ratio()))
+    return float(best)
+
+
+def _best_token_overlap(ref_token_sets: list[set[str]], cand_token_sets: list[set[str]]) -> float:
+    best = 0.0
+    for a in ref_token_sets:
+        if not a:
+            continue
+        for b in cand_token_sets:
+            if not b:
+                continue
+            inter = len(a & b)
+            union = len(a | b)
+            if union <= 0:
+                continue
+            best = max(best, float(inter / union))
+    return float(best)
+
+
+def _canonical_place_name(name: str) -> str:
+    # Backward-compatible canonical form used in a few places.
+    return _strip_place_suffix_once(_normalize_place_text(name))
 
 
 def _request_json_with_retry(url: str, *, timeout: float = 90.0, max_retries: int = 3) -> Any:
@@ -255,6 +364,23 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Ignore cached API/file pulls and re-fetch.",
     )
+    ap.add_argument(
+        "--manual-place-overrides",
+        default="",
+        help="Optional CSV with manual place IDs: city_key + place_geoid (or state_fips + place_fips).",
+    )
+    ap.add_argument(
+        "--fuzzy-match-threshold",
+        type=float,
+        default=0.92,
+        help="Minimum combined score for fuzzy place matching.",
+    )
+    ap.add_argument(
+        "--candidate-top-n",
+        type=int,
+        default=8,
+        help="How many place candidates per city to persist for diagnostics.",
+    )
     return ap.parse_args()
 
 
@@ -294,10 +420,12 @@ def _load_city_refs(run_dir: Path) -> list[CityRef]:
         if not rows:
             raise SystemExit(f"Missing required file: {p} and could not reconstruct from panels/issue_texts.jsonl")
         df = pd.DataFrame.from_records(rows)
-    need = {"city_key", "city_name", "state_abbr", "region", "urbanicity_proxy", "issue_date"}
+    need = {"city_key", "city_name", "state_abbr", "region", "issue_date"}
     miss = sorted(c for c in need if c not in df.columns)
     if miss:
         raise SystemExit(f"{p} missing columns: {miss}")
+    if "urbanicity_proxy" not in df.columns:
+        df["urbanicity_proxy"] = "unknown"
 
     df["state_abbr"] = df["state_abbr"].astype(str).str.lower()
     df["issue_year"] = pd.to_datetime(df["issue_date"], errors="coerce").dt.year
@@ -326,11 +454,73 @@ def _load_city_refs(run_dir: Path) -> list[CityRef]:
     return refs
 
 
+def _prepare_gazetteer_places(gaz_raw: pd.DataFrame) -> pd.DataFrame:
+    gaz = gaz_raw.copy()
+    gaz.columns = [str(c).strip() for c in gaz.columns]
+
+    has_raw = {"USPS", "GEOID", "NAME", "POP10", "INTPTLAT", "INTPTLONG"}.issubset(set(gaz.columns))
+    if has_raw:
+        gaz = gaz[["USPS", "GEOID", "NAME", "POP10", "INTPTLAT", "INTPTLONG"]].copy()
+        gaz["state_abbr"] = gaz["USPS"].astype(str).str.lower()
+        gaz["state_fips"] = gaz["GEOID"].astype(str).str.zfill(7).str.slice(0, 2)
+        gaz["place_fips"] = gaz["GEOID"].astype(str).str.zfill(7).str.slice(2, 7)
+        gaz["place_geoid"] = gaz["GEOID"].astype(str).str.zfill(7)
+        gaz["place_name_gazetteer"] = gaz["NAME"].astype(str)
+        gaz["pop10"] = pd.to_numeric(gaz["POP10"], errors="coerce")
+        gaz["intptlat"] = pd.to_numeric(gaz["INTPTLAT"], errors="coerce")
+        gaz["intptlong"] = pd.to_numeric(gaz["INTPTLONG"], errors="coerce")
+    else:
+        need = {"state_abbr", "state_fips", "place_fips", "place_geoid", "place_name_gazetteer"}
+        miss = sorted(c for c in need if c not in gaz.columns)
+        if miss:
+            raise SystemExit(f"Gazetteer cache missing required columns: {miss}")
+        if "pop10" not in gaz.columns:
+            gaz["pop10"] = math.nan
+        if "intptlat" not in gaz.columns:
+            gaz["intptlat"] = math.nan
+        if "intptlong" not in gaz.columns:
+            gaz["intptlong"] = math.nan
+
+    gaz["state_abbr"] = gaz["state_abbr"].astype(str).str.lower()
+    gaz["state_fips"] = gaz["state_fips"].astype(str).str.zfill(2)
+    gaz["place_fips"] = gaz["place_fips"].astype(str).str.zfill(5)
+    gaz["place_geoid"] = gaz["place_geoid"].astype(str).str.zfill(7)
+    gaz["place_name_gazetteer"] = gaz["place_name_gazetteer"].astype(str)
+    gaz["pop10"] = pd.to_numeric(gaz["pop10"], errors="coerce")
+    gaz["intptlat"] = pd.to_numeric(gaz["intptlat"], errors="coerce")
+    gaz["intptlong"] = pd.to_numeric(gaz["intptlong"], errors="coerce")
+
+    var = gaz["place_name_gazetteer"].astype(str).map(_build_name_variants)
+    gaz["name_norm_raw"] = var.map(lambda d: str(d.get("raw") or ""))
+    gaz["name_norm_strip1"] = var.map(lambda d: str(d.get("strip1") or ""))
+    gaz["name_norm_stripall"] = var.map(lambda d: str(d.get("stripall") or ""))
+    gaz["canonical_name"] = gaz["name_norm_strip1"]
+    gaz["name_token_count"] = gaz["name_norm_strip1"].astype(str).str.split().str.len().fillna(0).astype(int)
+
+    keep_cols = [
+        "state_abbr",
+        "state_fips",
+        "place_fips",
+        "place_geoid",
+        "place_name_gazetteer",
+        "name_norm_raw",
+        "name_norm_strip1",
+        "name_norm_stripall",
+        "canonical_name",
+        "name_token_count",
+        "pop10",
+        "intptlat",
+        "intptlong",
+    ]
+    return gaz[keep_cols].drop_duplicates(subset=["place_geoid"], keep="first").sort_values(["state_abbr", "place_geoid"]).reset_index(drop=True)
+
+
 def _load_gazetteer_places(cache_dir: Path, *, refresh: bool) -> pd.DataFrame:
     cache_json = cache_dir / "gazetteer_places_national.json"
     if cache_json.is_file() and not refresh:
         arr = json.loads(cache_json.read_text(encoding="utf-8"))
-        return pd.DataFrame.from_records(arr)
+        gaz = pd.DataFrame.from_records(arr)
+        return _prepare_gazetteer_places(gaz)
 
     url = "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/Gaz_places_national.zip"
     raw = requests.get(url, timeout=90)
@@ -340,83 +530,242 @@ def _load_gazetteer_places(cache_dir: Path, *, refresh: bool) -> pd.DataFrame:
     if not names:
         raise SystemExit("Unexpected empty gazetteer zip")
     with zf.open(names[0]) as f:
-        gaz = pd.read_csv(f, sep="\t", dtype=str, encoding="latin1")
-    gaz.columns = [str(c).strip() for c in gaz.columns]
-
-    need = {"USPS", "GEOID", "NAME", "POP10", "INTPTLAT", "INTPTLONG"}
-    miss = sorted(c for c in need if c not in gaz.columns)
-    if miss:
-        raise SystemExit(f"Gazetteer file missing columns: {miss}")
-
-    gaz = gaz[list(need)].copy()
-    gaz["state_abbr"] = gaz["USPS"].astype(str).str.lower()
-    gaz["state_fips"] = gaz["GEOID"].astype(str).str.slice(0, 2)
-    gaz["place_fips"] = gaz["GEOID"].astype(str).str.slice(2, 7)
-    gaz["canonical_name"] = gaz["NAME"].astype(str).map(_canonical_place_name)
-    gaz["pop10"] = pd.to_numeric(gaz["POP10"], errors="coerce")
-    gaz["intptlat"] = pd.to_numeric(gaz["INTPTLAT"], errors="coerce")
-    gaz["intptlong"] = pd.to_numeric(gaz["INTPTLONG"], errors="coerce")
-    gaz = gaz[
-        [
-            "state_abbr",
-            "state_fips",
-            "place_fips",
-            "GEOID",
-            "NAME",
-            "canonical_name",
-            "pop10",
-            "intptlat",
-            "intptlong",
-        ]
-    ].rename(columns={"GEOID": "place_geoid", "NAME": "place_name_gazetteer"})
+        gaz_raw = pd.read_csv(f, sep="\t", dtype=str, encoding="latin1")
+    gaz = _prepare_gazetteer_places(gaz_raw)
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_json.write_text(gaz.to_json(orient="records"), encoding="utf-8")
     return gaz
 
 
-def _match_city_to_place(refs: list[CityRef], gaz: pd.DataFrame) -> pd.DataFrame:
+def _load_manual_place_overrides(path: Path, gaz: pd.DataFrame) -> dict[str, str]:
+    if not str(path or "").strip():
+        return {}
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        raise SystemExit(f"manual place overrides file not found: {p}")
+    df = pd.read_csv(p, dtype=str).fillna("")
+    if "city_key" not in df.columns:
+        raise SystemExit(f"manual place overrides must include city_key column: {p}")
+    known_geoids = set(gaz["place_geoid"].astype(str))
+    out: dict[str, str] = {}
+    bad_rows: list[str] = []
+    for r in df.itertuples(index=False):
+        city_key = str(getattr(r, "city_key", "") or "").strip()
+        if not city_key:
+            continue
+        geoid = str(getattr(r, "place_geoid", "") or getattr(r, "census_place_geoid", "") or "").strip()
+        if not geoid:
+            st = str(getattr(r, "state_fips", "") or getattr(r, "census_state_fips", "") or "").strip()
+            pl = str(getattr(r, "place_fips", "") or getattr(r, "census_place_fips", "") or "").strip()
+            if st and pl:
+                geoid = st.zfill(2) + pl.zfill(5)
+        geoid = re.sub(r"[^0-9]", "", geoid)
+        if len(geoid) == 5:
+            st = str(getattr(r, "state_fips", "") or getattr(r, "census_state_fips", "") or "").strip()
+            if st:
+                geoid = st.zfill(2) + geoid
+        if len(geoid) != 7:
+            bad_rows.append(f"{city_key}: invalid geoid")
+            continue
+        if geoid not in known_geoids:
+            bad_rows.append(f"{city_key}: geoid {geoid} not in gazetteer")
+            continue
+        out[city_key] = geoid
+    if bad_rows:
+        sample = "; ".join(bad_rows[:8])
+        extra = f" (+{len(bad_rows)-8} more)" if len(bad_rows) > 8 else ""
+        print(f"Warning: skipped invalid manual overrides: {sample}{extra}", flush=True)
+    return out
+
+
+def _resolve_exact_method(ref_var: dict[str, Any], cand_var: dict[str, Any]) -> tuple[str, float]:
+    ref_raw = str(ref_var.get("raw") or "")
+    ref_strip1 = str(ref_var.get("strip1") or "")
+    ref_stripall = str(ref_var.get("stripall") or "")
+    cand_raw = str(cand_var.get("raw") or "")
+    cand_strip1 = str(cand_var.get("strip1") or "")
+    cand_stripall = str(cand_var.get("stripall") or "")
+
+    if ref_raw and cand_raw and ref_raw == cand_raw:
+        return "exact_raw", 1.0
+    if ref_raw and ref_raw in {cand_strip1, cand_stripall}:
+        return "exact_gazetteer_suffix_strip", 0.998
+    if ref_strip1 and ref_strip1 in {cand_strip1, cand_stripall}:
+        return "exact_both_suffix_strip", 0.996
+    if ref_stripall and ref_stripall in {cand_stripall, cand_strip1}:
+        return "exact_full_suffix_strip", 0.995
+
+    ref_alias = set(ref_var.get("keys") or [])
+    cand_alias = set(cand_var.get("keys") or [])
+    if ref_alias and cand_alias and (ref_alias & cand_alias):
+        return "exact_alias", 0.994
+    return "", math.nan
+
+
+def _match_city_to_place(
+    refs: list[CityRef],
+    gaz: pd.DataFrame,
+    *,
+    manual_overrides: dict[str, str] | None = None,
+    fuzzy_threshold: float = 0.92,
+    candidate_top_n: int = 8,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    manual = dict(manual_overrides or {})
+    geoid_to_row = {str(r.place_geoid): r for r in gaz.itertuples(index=False)}
+
     rows: list[dict[str, Any]] = []
+    cand_rows: list[dict[str, Any]] = []
     for r in refs:
         st = r.state_abbr
-        city_can = _canonical_place_name(r.city_name)
+        ref_var = _build_name_variants(r.city_name)
         g = gaz[gaz["state_abbr"] == st].copy()
-        exact = g[g["canonical_name"] == city_can].copy()
-        if not exact.empty:
-            exact = exact.sort_values(["pop10", "place_geoid"], ascending=[False, True])
-            hit = exact.iloc[0]
-            rows.append(
+
+        scored: list[dict[str, Any]] = []
+        for gr in g.itertuples(index=False):
+            cand_var = {
+                "raw": str(getattr(gr, "name_norm_raw", "") or ""),
+                "strip1": str(getattr(gr, "name_norm_strip1", "") or ""),
+                "stripall": str(getattr(gr, "name_norm_stripall", "") or ""),
+                "keys": [
+                    str(getattr(gr, "name_norm_raw", "") or ""),
+                    str(getattr(gr, "name_norm_strip1", "") or ""),
+                    str(getattr(gr, "name_norm_stripall", "") or ""),
+                ]
+                + _name_alias_variants(str(getattr(gr, "name_norm_raw", "") or ""))
+                + _name_alias_variants(str(getattr(gr, "name_norm_strip1", "") or ""))
+                + _name_alias_variants(str(getattr(gr, "name_norm_stripall", "") or "")),
+                "token_sets": [],
+            }
+            # Deduplicate candidate keys and build token sets.
+            seen: set[str] = set()
+            ck: list[str] = []
+            for k in cand_var["keys"]:
+                kk = str(k or "").strip()
+                if not kk or kk in seen:
+                    continue
+                seen.add(kk)
+                ck.append(kk)
+            cand_var["keys"] = ck
+            cand_var["token_sets"] = [set(x.split()) for x in ck if x]
+
+            exact_method, exact_score = _resolve_exact_method(ref_var, cand_var)
+            similarity = _best_name_similarity(ref_var["keys"], cand_var["keys"])
+            token_overlap = _best_token_overlap(ref_var["token_sets"], cand_var["token_sets"])
+            combined = float(exact_score) if exact_method else float(max(similarity, 0.75 * similarity + 0.25 * token_overlap))
+            fuzzy_ok = bool((not exact_method) and combined >= float(fuzzy_threshold) and token_overlap >= 0.34)
+
+            scored.append(
                 {
-                    "city_key": r.city_key,
-                    "city_name": r.city_name,
-                    "state_abbr": st,
-                    "region": r.region,
-                    "urbanicity_proxy": r.urbanicity_proxy,
-                    "min_issue_year": r.min_issue_year,
-                    "max_issue_year": r.max_issue_year,
-                    "place_geoid": str(hit["place_geoid"]),
-                    "state_fips": str(hit["state_fips"]),
-                    "place_fips": str(hit["place_fips"]),
-                    "place_name_gazetteer": str(hit["place_name_gazetteer"]),
-                    "place_pop10": _to_int(hit["pop10"]),
-                    "intptlat": _to_float(hit["intptlat"]),
-                    "intptlong": _to_float(hit["intptlong"]),
-                    "match_method": "exact",
-                    "match_score": 1.0,
-                    "candidate_count": int(len(exact)),
+                    "place_geoid": str(gr.place_geoid),
+                    "state_fips": str(gr.state_fips),
+                    "place_fips": str(gr.place_fips),
+                    "place_name_gazetteer": str(gr.place_name_gazetteer),
+                    "place_pop10": _to_int(gr.pop10),
+                    "intptlat": _to_float(gr.intptlat),
+                    "intptlong": _to_float(gr.intptlong),
+                    "name_norm_raw": str(getattr(gr, "name_norm_raw", "") or ""),
+                    "name_norm_strip1": str(getattr(gr, "name_norm_strip1", "") or ""),
+                    "name_norm_stripall": str(getattr(gr, "name_norm_stripall", "") or ""),
+                    "exact_method": str(exact_method or ""),
+                    "similarity": float(similarity),
+                    "token_overlap": float(token_overlap),
+                    "score": float(combined),
+                    "fuzzy_ok": int(fuzzy_ok),
                 }
             )
-            continue
 
-        best: dict[str, Any] | None = None
-        for gr in g.itertuples(index=False):
-            cand = str(gr.canonical_name or "")
-            if not cand:
-                continue
-            score = SequenceMatcher(None, city_can, cand).ratio()
-            if best is None or score > float(best["score"]):
-                best = {"score": score, "row": gr}
-        if best is not None and float(best["score"]) >= 0.88:
-            hit = best["row"]
+        scored = sorted(
+            scored,
+            key=lambda x: (
+                1 if str(x["exact_method"]) else 0,
+                float(x["score"]),
+                float(x["token_overlap"]),
+                float(x["place_pop10"] or -1),
+                str(x["place_geoid"]),
+            ),
+            reverse=True,
+        )
+
+        selected: dict[str, Any] | None = None
+        selected_method = "unmatched"
+        selected_conf = "unmatched"
+        selected_score = math.nan
+        selected_similarity = math.nan
+        selected_token_overlap = math.nan
+        selected_detail = ""
+        candidate_count = 0
+        manual_used = 0
+
+        manual_geoid = manual.get(str(r.city_key))
+        if manual_geoid and manual_geoid in geoid_to_row:
+            gg = geoid_to_row[manual_geoid]
+            selected = {
+                "place_geoid": str(gg.place_geoid),
+                "state_fips": str(gg.state_fips),
+                "place_fips": str(gg.place_fips),
+                "place_name_gazetteer": str(gg.place_name_gazetteer),
+                "place_pop10": _to_int(gg.pop10),
+                "intptlat": _to_float(gg.intptlat),
+                "intptlong": _to_float(gg.intptlong),
+                "name_norm_raw": str(getattr(gg, "name_norm_raw", "") or ""),
+                "name_norm_strip1": str(getattr(gg, "name_norm_strip1", "") or ""),
+            }
+            selected_method = "manual_override"
+            selected_conf = "high"
+            selected_score = 1.0
+            selected_similarity = 1.0
+            selected_token_overlap = 1.0
+            selected_detail = "manual_override"
+            candidate_count = 1
+            manual_used = 1
+        elif scored:
+            top = scored[0]
+            if str(top["exact_method"]):
+                selected = top
+                selected_method = "exact"
+                selected_conf = "high"
+                selected_score = float(top["score"])
+                selected_similarity = float(top["similarity"])
+                selected_token_overlap = float(top["token_overlap"])
+                selected_detail = str(top["exact_method"])
+                candidate_count = int(sum(1 for x in scored if str(x["exact_method"]) == str(top["exact_method"])))
+            elif int(top.get("fuzzy_ok") or 0) == 1:
+                selected = top
+                selected_method = "fuzzy"
+                selected_score = float(top["score"])
+                selected_similarity = float(top["similarity"])
+                selected_token_overlap = float(top["token_overlap"])
+                selected_detail = "fuzzy_combined"
+                selected_conf = "medium" if selected_score >= 0.96 and selected_token_overlap >= 0.5 else "low"
+                candidate_count = int(sum(1 for x in scored if int(x.get("fuzzy_ok") or 0) == 1))
+
+        selected_geoid = str(selected.get("place_geoid") or "") if isinstance(selected, dict) else ""
+        top_n = max(1, int(candidate_top_n))
+        for rank, x in enumerate(scored[:top_n], start=1):
+            cand_rows.append(
+                {
+                    "city_key": str(r.city_key),
+                    "city_name": str(r.city_name),
+                    "state_abbr": st,
+                    "region": str(r.region),
+                    "rank": int(rank),
+                    "selected_place_geoid": selected_geoid,
+                    "is_selected": int(bool(selected_geoid and str(x["place_geoid"]) == selected_geoid)),
+                    "is_manual_override": int(manual_used),
+                    "place_geoid": str(x["place_geoid"]),
+                    "state_fips": str(x["state_fips"]),
+                    "place_fips": str(x["place_fips"]),
+                    "place_name_gazetteer": str(x["place_name_gazetteer"]),
+                    "place_pop10": x["place_pop10"],
+                    "score": float(x["score"]),
+                    "similarity": float(x["similarity"]),
+                    "token_overlap": float(x["token_overlap"]),
+                    "exact_method": str(x["exact_method"]),
+                    "fuzzy_ok": int(x["fuzzy_ok"]),
+                }
+            )
+
+        if selected is not None:
             rows.append(
                 {
                     "city_key": r.city_key,
@@ -426,16 +775,28 @@ def _match_city_to_place(refs: list[CityRef], gaz: pd.DataFrame) -> pd.DataFrame
                     "urbanicity_proxy": r.urbanicity_proxy,
                     "min_issue_year": r.min_issue_year,
                     "max_issue_year": r.max_issue_year,
-                    "place_geoid": str(hit.place_geoid),
-                    "state_fips": str(hit.state_fips),
-                    "place_fips": str(hit.place_fips),
-                    "place_name_gazetteer": str(hit.place_name_gazetteer),
-                    "place_pop10": _to_int(hit.pop10),
-                    "intptlat": _to_float(hit.intptlat),
-                    "intptlong": _to_float(hit.intptlong),
-                    "match_method": "fuzzy",
-                    "match_score": float(best["score"]),
-                    "candidate_count": int(len(g)),
+                    "place_geoid": str(selected.get("place_geoid") or ""),
+                    "state_fips": str(selected.get("state_fips") or ""),
+                    "place_fips": str(selected.get("place_fips") or ""),
+                    "census_place_geoid": str(selected.get("place_geoid") or ""),
+                    "census_state_fips": str(selected.get("state_fips") or ""),
+                    "census_place_fips": str(selected.get("place_fips") or ""),
+                    "place_name_gazetteer": str(selected.get("place_name_gazetteer") or ""),
+                    "place_pop10": _to_int(selected.get("place_pop10")),
+                    "intptlat": _to_float(selected.get("intptlat")),
+                    "intptlong": _to_float(selected.get("intptlong")),
+                    "ref_name_norm_raw": str(ref_var.get("raw") or ""),
+                    "ref_name_norm_strip1": str(ref_var.get("strip1") or ""),
+                    "match_name_norm_raw": str(selected.get("name_norm_raw") or ""),
+                    "match_name_norm_strip1": str(selected.get("name_norm_strip1") or ""),
+                    "match_method": str(selected_method),
+                    "match_method_detail": str(selected_detail),
+                    "match_confidence": str(selected_conf),
+                    "match_score": float(selected_score),
+                    "name_similarity": float(selected_similarity),
+                    "token_overlap": float(selected_token_overlap),
+                    "candidate_count": int(candidate_count),
+                    "candidate_count_state": int(len(g)),
                 }
             )
             continue
@@ -452,17 +813,31 @@ def _match_city_to_place(refs: list[CityRef], gaz: pd.DataFrame) -> pd.DataFrame
                 "place_geoid": "",
                 "state_fips": _STATE_ABBR_TO_FIPS.get(st, ""),
                 "place_fips": "",
+                "census_place_geoid": "",
+                "census_state_fips": _STATE_ABBR_TO_FIPS.get(st, ""),
+                "census_place_fips": "",
                 "place_name_gazetteer": "",
                 "place_pop10": math.nan,
                 "intptlat": math.nan,
                 "intptlong": math.nan,
+                "ref_name_norm_raw": str(ref_var.get("raw") or ""),
+                "ref_name_norm_strip1": str(ref_var.get("strip1") or ""),
+                "match_name_norm_raw": "",
+                "match_name_norm_strip1": "",
                 "match_method": "unmatched",
+                "match_method_detail": "unmatched",
+                "match_confidence": "unmatched",
                 "match_score": math.nan,
-                "candidate_count": int(len(g)),
+                "name_similarity": math.nan,
+                "token_overlap": math.nan,
+                "candidate_count": 0,
+                "candidate_count_state": int(len(g)),
             }
         )
+
     out = pd.DataFrame.from_records(rows).sort_values(["state_abbr", "city_name"]).reset_index(drop=True)
-    return out
+    cands = pd.DataFrame.from_records(cand_rows).sort_values(["state_abbr", "city_name", "rank"]).reset_index(drop=True)
+    return out, cands
 
 
 def _load_fcc_county_cache(path: Path) -> dict[str, dict[str, Any]]:
@@ -869,6 +1244,36 @@ def _build_missingness_report(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame.from_records(rows)
 
 
+def _build_place_match_summary(place_xw: pd.DataFrame) -> pd.DataFrame:
+    if place_xw.empty:
+        return pd.DataFrame(
+            columns=[
+                "metric",
+                "value",
+                "count",
+                "share",
+            ]
+        )
+
+    rows: list[dict[str, Any]] = []
+    n = int(len(place_xw))
+    for metric, col in (
+        ("match_method", "match_method"),
+        ("match_confidence", "match_confidence"),
+    ):
+        vc = place_xw[col].astype(str).fillna("").replace({"": "missing"}).value_counts(dropna=False)
+        for k, c in vc.items():
+            rows.append(
+                {
+                    "metric": metric,
+                    "value": str(k),
+                    "count": int(c),
+                    "share": float(c / max(1, n)),
+                }
+            )
+    return pd.DataFrame.from_records(rows).sort_values(["metric", "count", "value"], ascending=[True, False, True]).reset_index(drop=True)
+
+
 def main() -> None:
     args = _parse_args()
     run_dir = Path(args.run_dir).expanduser().resolve()
@@ -891,9 +1296,31 @@ def main() -> None:
     permit_years = [y for y in range(max(int(args.permits_start_year), year_min), year_max + 1)]
 
     gaz = _load_gazetteer_places(cache_dir, refresh=bool(args.refresh_cache))
-    place_xw = _match_city_to_place(refs, gaz)
+    manual_overrides = _load_manual_place_overrides(Path(args.manual_place_overrides), gaz) if str(args.manual_place_overrides).strip() else {}
+    place_xw, place_candidates = _match_city_to_place(
+        refs,
+        gaz,
+        manual_overrides=manual_overrides,
+        fuzzy_threshold=float(args.fuzzy_match_threshold),
+        candidate_top_n=int(args.candidate_top_n),
+    )
     place_xw_path = out_dir / "city_place_crosswalk.csv"
     place_xw.to_csv(place_xw_path, index=False, quoting=csv.QUOTE_MINIMAL)
+    place_candidates_path = out_dir / "city_place_match_candidates.csv"
+    place_candidates.to_csv(place_candidates_path, index=False, quoting=csv.QUOTE_MINIMAL)
+    place_match_summary = _build_place_match_summary(place_xw)
+    place_match_summary_path = out_dir / "city_place_match_summary.csv"
+    place_match_summary.to_csv(place_match_summary_path, index=False, quoting=csv.QUOTE_MINIMAL)
+    unmatched = place_xw[place_xw["match_method"].astype(str) == "unmatched"].copy()
+    unmatched_path = out_dir / "city_place_unmatched.csv"
+    unmatched.to_csv(unmatched_path, index=False, quoting=csv.QUOTE_MINIMAL)
+    manual_template = unmatched[["city_key", "city_name", "state_abbr"]].copy()
+    manual_template["place_geoid"] = ""
+    manual_template["state_fips"] = manual_template["state_abbr"].astype(str).map(_STATE_ABBR_TO_FIPS).fillna("")
+    manual_template["place_fips"] = ""
+    manual_template["notes"] = ""
+    manual_template_path = out_dir / "manual_place_overrides_template.csv"
+    manual_template.to_csv(manual_template_path, index=False, quoting=csv.QUOTE_MINIMAL)
 
     county_xw = _attach_county_crosswalk(place_xw, cache_dir=cache_dir, refresh=bool(args.refresh_cache))
     county_xw_path = out_dir / "city_county_crosswalk.csv"
@@ -984,13 +1411,22 @@ def main() -> None:
         "acs_start_year": int(args.acs_start_year),
         "acs_end_year": int(acs_end_year),
         "permits_start_year": int(args.permits_start_year),
+        "manual_place_overrides": str(Path(args.manual_place_overrides).expanduser().resolve()) if str(args.manual_place_overrides).strip() else "",
+        "fuzzy_match_threshold": float(args.fuzzy_match_threshold),
+        "candidate_top_n": int(args.candidate_top_n),
         "acs_years_requested": acs_years,
         "permit_years_requested": permit_years,
         "n_city_year_rows": int(len(city_year)),
+        "exact_match_rate": float((place_xw["match_method"] == "exact").mean()) if not place_xw.empty else math.nan,
+        "high_confidence_place_match_rate": float((place_xw["match_confidence"] == "high").mean()) if not place_xw.empty else math.nan,
         "place_match_rate": float((place_xw["match_method"] != "unmatched").mean()) if not place_xw.empty else math.nan,
         "county_match_rate": float((county_xw["county_fips"].astype(str).str.len() == 5).mean()) if not county_xw.empty else math.nan,
         "outputs": {
             "city_place_crosswalk": str(place_xw_path),
+            "city_place_match_candidates": str(place_candidates_path),
+            "city_place_match_summary": str(place_match_summary_path),
+            "city_place_unmatched": str(unmatched_path),
+            "manual_place_overrides_template": str(manual_template_path),
             "city_county_crosswalk": str(county_xw_path),
             "city_year_external_covariates": str(cov_path),
             "covariate_missingness_report": str(miss_path),
@@ -1002,6 +1438,7 @@ def main() -> None:
         "Done. "
         f"city_refs={len(refs)} "
         f"city_year_rows={len(city_year)} "
+        f"exact_match_rate={prov['exact_match_rate']:.3f} "
         f"place_match_rate={prov['place_match_rate']:.3f} "
         f"county_match_rate={prov['county_match_rate']:.3f}"
     )
