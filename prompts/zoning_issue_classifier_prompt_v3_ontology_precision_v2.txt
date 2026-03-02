@@ -1,0 +1,202 @@
+You are classifying one newspaper issue transcript that may contain:
+
+* zoning law text,
+* zoning hearing notices,
+* zoning discussion without law text,
+* non-zoning legal notices/ordinances, and
+* unrelated content.
+
+Important scope:
+
+* Classify conservatively.
+* "full code" is rare and should only be used when the text itself shows a self-contained full-code publication event in that issue (not just codified-looking fragments).
+* If uncertain between full code vs excerpt/amendment/notice/discussion, do NOT choose full code.
+* Do NOT infer ordinance jurisdiction (city/state) from the newspaper’s publication location, masthead, dateline, or page headers. Only use the governing jurisdiction named in the ordinance text; otherwise return unknown.
+
+Primary objective:
+
+1. Detect whether any zoning content is present.
+2. If present, classify what kind of zoning material it is.
+3. Distinguish comprehensive full zoning code from narrower amendments/notices and from excerpted/continued fragments.
+4. Keep document-type classification stable while separately and reliably indicating operativity (proposed vs operative).
+
+Definitions:
+
+* zoning anchor: explicit references such as "zoning", "zoning ordinance", "rezoning", "zoning map", zoning district changes (e.g., R-1 to C-1), zoning board/commission, variance, conditional/special use.
+* zoning legal text: operative or proposed legal language that enacts, adopts, repeals, replaces, or changes zoning rules/order (printed clauses/sections, not just narrative).
+* hearing notice: formal notice of a zoning hearing with schedule/place context.
+* zoning discussion: zoning is discussed/reported but legal text is not printed.
+* ordinance jurisdiction: the governing city/town/village/township/borough/county/state named in the legal text (not necessarily the newspaper's publication city).
+* continuation fragment: codified-looking text that appears to be an installment or partial carryover (e.g., starts mid-section without title/adoption context; “continued from/on page …”; “to be continued”; “(cont.)”; truncated sections; partial serial printing across issues).
+
+Decision order (use this order to avoid “full code” overcalls):
+A) Determine zoning_presence (unrelated vs hearing notice vs discussion vs legal text).
+B) If zoning_legal_text, decide legal_document_class based on scope and completeness signals (full vs excerpt vs amendment vs order vs non-zoning).
+C) Separately decide operativity (operative vs proposed vs unclear) without changing the document-type class unless required by the strict full_code_comprehensive definition.
+D) Extract ordinance_jurisdiction only from ordinance text; otherwise unknown.
+E) Set confidence and quality_flags; activate uncertainty behavior when signals are incomplete, fragmented, or OCR-noisy.
+
+Operativity cues (do NOT treat these as document-type cues by themselves):
+
+* operative cues: “Be it ordained/enacted,” “hereby adopted,” “passed and adopted,” “approved,” “effective date,” “shall take effect,” mayor/council signatures, certification/attestation, “ordains as follows.”
+* proposed cues: “proposed,” “draft,” “for consideration,” “to be considered,” “introduced,” “first reading,” “public hearing on the proposed ordinance/code,” “will be adopted,” “recommended,” “planning commission recommends,” “notice of adoption (where full text not printed).”
+* unclear: mixed cues, missing adoption/reading/effective context, or too fragmentary to determine.
+
+Full-code standard (very strict; “full” means self-contained in this issue, not just code-like structure):
+Use full_code_comprehensive or full_code_recodification only when ALL are true:
+
+1. The issue prints standing citywide zoning code text (not only one parcel/district action, not only hearing/notice logistics, not only news summary).
+2. The printed text includes ordinance-style legal structure (articles/sections/definitions/clauses), not merely narrative statements.
+3. At least 3 of these 4 components are explicitly visible in printed legal text:
+
+   * district framework/classifications,
+   * use rules (permitted/prohibited/conditional uses),
+   * dimensional standards (lot size, setbacks, height, density, parking),
+   * procedures/enforcement/administration (boards, permits, appeals, penalties, definitions).
+4. There is explicit adoption/recodification context tied to that code text in the same issue (not inferred from tone or structure).
+5. The code publication is self-contained in this issue (see “self-containedness checks” below). If it appears to be a continuation fragment or serial installment, it is NOT full_code_*.
+
+Self-containedness checks (required for full_code_comprehensive; strongly preferred for full_code_recodification):
+To treat as a self-contained full-code publication event in this issue, the text should show clear “start-of-code” and “publication completeness” signals, such as:
+
+* a clear ordinance/code title header (e.g., “Zoning Ordinance,” “Zoning Code,” “Comprehensive Zoning Ordinance”) paired with the governing jurisdiction,
+* ordinance number or formal adopting instrument (“Ordinance No. …” / “An ordinance adopting …”),
+* an adoption clause/preamble (“Be it ordained…”, “This code is adopted…”),
+* an effective date clause and/or passage/approval signatures/attestation,
+* a table-of-contents-like structure or early definitional/administrative sections that indicate the document starts at or near the beginning,
+  AND it must NOT show continuation/fragment signals (see vetoes below).
+  If these start/completeness signals are missing or the text begins mid-stream (e.g., “Section 7.14…” with no title/adoption context), treat as comprehensive_code_excerpt.
+
+Comprehensive vs recodification boundary (tighten only the comprehensive branch):
+
+* full_code_comprehensive: ONLY when the issue shows enacted, in-force comprehensive code adoption/publication and the publication is self-contained in the issue. If the text looks comprehensive but adoption is proposed/draft/for hearing, or self-containedness is not proven, DO NOT use full_code_comprehensive; use comprehensive_code_excerpt with operativity=proposed/unclear.
+* full_code_recodification: Use when the issue explicitly indicates recodifying/replacing/consolidating a code (e.g., “recodify,” “repeal and reenact,” “replace in its entirety,” “codification,” “new code,” “comprehensive revision/rewrite,” “consolidated code”), and prints substantial code text. Recodification may be proposed or operative; keep this class if recodification context is explicit and code text is substantial. Do not “upgrade” to full_code_comprehensive unless enacted/in-force adoption is explicit and the publication is self-contained.
+
+Hard vetoes for full_code_* (apply these aggressively, especially for comprehensive):
+
+* Continuation/serial fragment veto: if the issue shows continuation fragment signals (“continued from/on page…”, “to be continued”, “(cont.)”, truncated sections, starts mid-section with no ordinance header/adoption context), do NOT use full_code_*. Use comprehensive_code_excerpt (and add quality flag insufficient_text_for_confident_full_code; lower confidence).
+* Structural-language-only veto: dense “Section/District” structure alone is never sufficient for full_code_* if explicit adoption/recodification context is missing in the same issue.
+* Hearing/public-notice dominant veto: if the issue is mainly hearing/public notice language (hearing date/time/place, “copy may be examined,” publication logistics) and does not print substantial codified zoning sections, do NOT use full_code_*.
+* News summary veto: if the issue only summarizes zoning changes in prose (“ordinance adopted,” “rules are set out”) without substantial codified clauses, do NOT use full_code_*.
+* Cross-domain veto: if zoning appears only as a cross-reference inside another policy domain (cannabis licensing, traffic, health/sanitary, finance/bonds), use non_zoning_ordinance unless substantive zoning code clauses are printed.
+
+Class guidance:
+
+* full_code_comprehensive: enacted in-force comprehensive code publication; self-contained in this issue.
+* full_code_recodification: explicit recodifying/replacing/consolidating zoning code publication (may be proposed or operative); substantial code text.
+* comprehensive_code_excerpt: broad code-like zoning excerpt, but ANY of the following is true:
+
+  * adoption/recodification context is missing or not clearly tied to the printed code text in the same issue,
+  * self-containedness is not established (possible continuation/serial fragment),
+  * fewer than 3 of the 4 core components are visible,
+  * OCR/mixed-content fragmentation prevents confident “full” determination.
+* amendment_substantial_text: amendment/revision with long replacement legal text (but clearly limited in scope vs a full citywide code publication).
+* amendment_targeted_text: focused legal change (limited clauses/sections).
+* map_rezoning_order: rezoning map/order for specific parcels/areas.
+* variance_special_use_order: variance/special-use action language.
+* procedural_notice_only: formal zoning notice/hearing/adoption notice without substantial printed zoning code clauses.
+* non_zoning_ordinance: legal ordinance text but not zoning-law text.
+* uncertain: use when zoning presence or document type cannot be determined due to severe OCR noise, extreme fragmentation, or insufficient legible text, even after conservative reading.
+
+Jurisdiction extraction rules (anti-bias, text-only):
+
+* Extract ordinance_jurisdiction ONLY if the ordinance text itself names the governing authority (e.g., “City of ___”, “Town of ___”, “Village of ___”, “County of ___”, “State of ___”) in an enacting/adopting header, “be it ordained” clause, or similar legal authority line.
+* If multiple places appear, prioritize the place that is explicitly the governing/ordaining body (not mailing addresses, newspaper offices, publishers, or hearing locations). If still ambiguous, set jurisdiction unknown and add quality flag ambiguous_scope.
+* If jurisdiction is absent in the ordinance text, set city/state_abbr empty and jurisdiction_level="unknown" (do NOT guess).
+
+Confidence and uncertainty behavior (must be stricter for full_code_comprehensive):
+
+* High confidence (>=0.85) is reserved for cases with clear, legible evidence quotes showing the core signals for that class.
+* If OCR noise, mixed pages (classifieds/ads + fragments), or fragmentation prevent seeing adoption/recodification ties, reduce confidence and add quality flags (ocr_noise, mixed_issue_content, insufficient_text_for_confident_full_code).
+* For full_code_* candidates:
+
+  * If any core signal is missing (especially adoption/recodification context or self-containedness), do not keep full_code_*; downgrade to comprehensive_code_excerpt and reduce confidence.
+  * If class is full_code_* and quality_flags contains insufficient_text_for_confident_full_code, downgrade class to comprehensive_code_excerpt.
+
+Output JSON only with this exact schema:
+{
+"zoning_presence": {
+"has_any_zoning_reference": true/false,
+"primary_class": "unrelated|zoning_discussion|zoning_hearing_notice|zoning_legal_text",
+"confidence_0_to_1": 0.0,
+"evidence_quote": ""
+},
+"legal_document_class": {
+"class": "none|full_code_comprehensive|full_code_recodification|comprehensive_code_excerpt|amendment_substantial_text|amendment_targeted_text|map_rezoning_order|variance_special_use_order|procedural_notice_only|non_zoning_ordinance|uncertain",
+"operativity": "none|operative|proposed|unclear",
+"scope": "none|citywide|district_wide|parcel_specific|mixed|unknown",
+"confidence_0_to_1": 0.0,
+"evidence_quote": ""
+},
+"ordinance_jurisdiction": {
+"city": "",
+"state_abbr": "",
+"jurisdiction_level": "city|town|village|township|borough|county|regional|state|unknown",
+"confidence_0_to_1": 0.0,
+"evidence_quote": ""
+},
+"full_code_components_present": {
+"district_framework": true/false,
+"use_rules": true/false,
+"dimensional_standards": true/false,
+"procedures_enforcement_admin": true/false
+},
+"legacy_projection_label": "full_ordinance|amendment_substantial|amendment_targeted|public_hearing|unrelated",
+"topic_touches": [
+"land_use_restrictions",
+"bulk_dimensional_standards",
+"procedural_governance",
+"nonconforming_use",
+"definitions",
+"parking_transport",
+"environmental_protection",
+"historic_preservation",
+"flexible_zoning",
+"inclusionary_affordable_housing",
+"enforcement_penalties",
+"miscellaneous_site_rules"
+],
+"quality_flags": [
+"mixed_issue_content",
+"possible_non_zoning_legal_text",
+"insufficient_text_for_confident_full_code",
+"ocr_noise",
+"ambiguous_scope"
+],
+"rationale": ""
+}
+
+Consistency constraints:
+
+* If has_any_zoning_reference=false:
+
+  * primary_class must be "unrelated"
+  * legal_document_class.class must be "none" or "non_zoning_ordinance"
+  * legacy_projection_label must be "unrelated"
+* If primary_class is zoning_hearing_notice and no substantial printed zoning legal clauses are present:
+
+  * legal_document_class.class should usually be "procedural_notice_only"
+  * legacy_projection_label should be "public_hearing"
+* If legal_document_class.class is full_code_comprehensive or full_code_recodification:
+
+  * primary_class must be zoning_legal_text
+  * legacy_projection_label must be full_ordinance
+* ordinance_jurisdiction.city/state_abbr must describe the governing jurisdiction named in the legal text, not the newspaper brand/location.
+* If jurisdiction cannot be determined from text, set:
+
+  * ordinance_jurisdiction.city=""
+  * ordinance_jurisdiction.state_abbr=""
+  * ordinance_jurisdiction.jurisdiction_level="unknown"
+* If legal_document_class.class is comprehensive_code_excerpt:
+
+  * primary_class must be zoning_legal_text
+  * do not treat this as definitive full-ordinance event classification.
+* For map/district reclassification of specific parcels:
+
+  * prefer map_rezoning_order and legacy_projection_label=amendment_targeted
+* topic_touches must only include values from the provided list.
+* evidence_quote fields should be short verbatim snippets from issue text.
+* ordinance_jurisdiction.evidence_quote should be a short verbatim quote naming the governing place (for example "City of X, State of Y").
+* If class is full_code_* and quality_flags contains insufficient_text_for_confident_full_code, downgrade class to comprehensive_code_excerpt.
+
+Return JSON only. No markdown.
