@@ -184,29 +184,39 @@ def _parse_args() -> argparse.Namespace:
         help="Model for llm_hybrid and llm_only methods.",
     )
     ap.add_argument("--llm-max-candidate-blocks", type=int, default=24)
-    ap.add_argument("--llm-max-block-chars", type=int, default=2200)
-    ap.add_argument("--llm-max-issue-candidate-chars", type=int, default=42000)
+    ap.add_argument(
+        "--llm-max-block-chars",
+        type=int,
+        default=2200,
+        help="Hard cap for per-block text included in llm_hybrid candidate prompts. 0 means no local cap. If positive and exceeded, the run fails (no clipping).",
+    )
+    ap.add_argument(
+        "--llm-max-issue-candidate-chars",
+        type=int,
+        default=42000,
+        help="Hard cap for total candidate-block text included in llm_hybrid prompts. 0 means no local cap. If positive and exceeded, the run fails (no clipping).",
+    )
     ap.add_argument(
         "--llm-only-max-block-chars",
         type=int,
         default=0,
-        help="Optional per-block clip (chars) for llm_only prompts. 0 means no clipping.",
+        help="Hard cap for per-block text included in llm_only prompts. 0 means no local cap. If positive and exceeded, the run fails (no clipping).",
     )
     ap.add_argument(
         "--llm-only-max-issue-chars",
         type=int,
         default=0,
-        help="Optional total-issue clip (chars) for llm_only prompts. 0 means no clipping.",
+        help="Hard cap for total issue text included in llm_only prompts. 0 means no local cap. If positive and exceeded, the run fails (no clipping).",
     )
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument(
         "--gateway-runner",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/experimental/scripts/run_openai_requests_via_gateway.py",
+        default=str(Path(__file__).resolve().parents[1] / "scripts" / "run_openai_requests_via_gateway.py"),
     )
     ap.add_argument(
         "--gateway-pythonpath",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/agent-gateway/src",
+        default=str(Path(__file__).resolve().parents[1] / "agent-gateway" / "src"),
     )
     ap.add_argument(
         "--gov-env-path",
@@ -663,14 +673,14 @@ def _parse_json_from_text(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _clip_for_prompt(text: str, max_chars: int) -> str:
+def _bounded_text_or_fail(text: str, max_chars: int, *, label: str) -> str:
     t = str(text or "")
-    if len(t) <= max_chars:
+    if max_chars <= 0 or len(t) <= max_chars:
         return t
-    head = int(max_chars * 0.7)
-    head = max(1, min(head, max_chars - 1))
-    tail = max_chars - head
-    return t[:head] + "\n\n[... clipped ...]\n\n" + t[-tail:]
+    raise SystemExit(
+        f"{label} chars={len(t)} exceeds hard cap {int(max_chars)}; no clipping allowed. "
+        "Increase the cap or set it to 0 for no local cap."
+    )
 
 
 def _build_llm_prompt(issue: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
@@ -775,13 +785,11 @@ def _build_llm_only_prompt(issue: dict[str, Any], blocks: list[str], *, max_bloc
     )
     lines.append("")
     lines.append("Blocks (split by blank lines):")
+    issue_id = _norm_str(issue.get("issue_id"))
     for i, b in enumerate(blocks):
         lines.append("")
         lines.append(f"[BLOCK {int(i)}]")
-        if int(max_block_chars) > 0:
-            lines.append(_clip_for_prompt(b, int(max_block_chars)))
-        else:
-            lines.append(b)
+        lines.append(_bounded_text_or_fail(b, int(max_block_chars), label=f"issue_id={issue_id} block_id={int(i)} block_text"))
     lines.append("")
     lines.append("Return JSON now.")
     return "\n".join(lines).strip()
@@ -945,6 +953,7 @@ def _build_llm_candidate_blocks(
     max_block_chars: int,
     max_issue_chars: int,
 ) -> list[dict[str, Any]]:
+    issue_id = _norm_str(issue.get("issue_id"))
     blocks = recall_extract["blocks"]
     feats = recall_extract["block_features"]
     keep_ids = set(recall_extract["kept_block_ids"])
@@ -957,10 +966,15 @@ def _build_llm_candidate_blocks(
         legal = int(f.get("legal_hits") or 0)
         ok_context = (hard >= 1) or (legal >= 1 and soft >= 1)
         if (i in keep_ids and ok_context) or (ok_context and float(f["score"]) > -0.2):
+            bounded_text = _bounded_text_or_fail(
+                block_text,
+                int(max_block_chars),
+                label=f"issue_id={issue_id} block_id={int(i)} candidate_block_text",
+            )
             cand.append(
                 {
                     "block_id": int(i),
-                    "text": _clip_for_prompt(block_text, max_block_chars),
+                    "text": bounded_text,
                     "score": float(f["score"]),
                     "hard_hits": int(hard),
                     "soft_hits": int(soft),
@@ -979,8 +993,11 @@ def _build_llm_candidate_blocks(
     for c in cand:
         t = str(c["text"])
         c_len = len(t)
-        if used + c_len > max_issue_chars and out:
-            break
+        if int(max_issue_chars) > 0 and used + c_len > int(max_issue_chars):
+            raise SystemExit(
+                f"issue_id={issue_id} candidate_blocks_chars={used + c_len} exceeds hard cap {int(max_issue_chars)}; "
+                "no clipping allowed. Increase the cap or set it to 0 for no local cap."
+            )
         out.append(c)
         used += c_len
     return out
@@ -1225,14 +1242,14 @@ def _run_method_llm_only(
         issue_id = _norm_str(issue.get("issue_id"))
         cid = f"zoning_extract_llm_only_pass1::{_norm_str(issue.get('city_key'))}::{issue_id}"
         blocks = _split_blocks(_norm_str(issue.get("text")))
-        # If the issue is very large and a total budget is provided, clip blocks (but do not drop blocks).
         issue_chars = sum(len(b) for b in blocks)
-        max_block_chars = int(llm_only_max_block_chars)
-        if int(llm_only_max_issue_chars) > 0 and issue_chars > int(llm_only_max_issue_chars) and blocks:
-            per_block = max(400, int(int(llm_only_max_issue_chars) // max(1, len(blocks))))
-            if max_block_chars <= 0 or per_block < max_block_chars:
-                max_block_chars = per_block
-        prompt = _build_llm_only_prompt(issue, blocks, max_block_chars=int(max_block_chars))
+        max_issue_chars = int(llm_only_max_issue_chars)
+        if max_issue_chars > 0 and issue_chars > max_issue_chars:
+            raise SystemExit(
+                f"issue_id={issue_id} issue_chars={issue_chars} exceeds hard cap {max_issue_chars}; no clipping allowed. "
+                "Increase the cap or set it to 0 for no local cap."
+            )
+        prompt = _build_llm_only_prompt(issue, blocks, max_block_chars=int(llm_only_max_block_chars))
         pass1_req_rows.append((cid, prompt))
         issue_meta[cid] = {"issue": issue, "blocks": blocks}
 

@@ -1356,7 +1356,14 @@ def _panel_prompt(city_name: str, state_abbr: str, rows: list[PanelIssue], *, ma
     lines.append(f"City: {city_name}, {state_abbr.upper()}")
     lines.append("Panel issues:")
     for i, r in enumerate(sorted(rows, key=lambda x: x.issue_date), start=1):
-        excerpt = r.text[: int(max_issue_chars)].strip()
+        txt = str(r.text or "").strip()
+        cap = int(max_issue_chars)
+        if cap > 0 and len(txt) > cap:
+            raise SystemExit(
+                f"issue_id={r.issue_id} chars={len(txt)} exceeds hard cap {cap}; no clipping allowed. "
+                "Increase the cap or set it to 0 for no local cap."
+            )
+        excerpt = txt
         lines.append("")
         lines.append(
             f"[ISSUE {i}] issue_id={r.issue_id} date={r.issue_date} label={r.classification_label} chars={r.text_chars}"
@@ -1368,7 +1375,14 @@ def _panel_prompt(city_name: str, state_abbr: str, rows: list[PanelIssue], *, ma
 
 
 def _issue_prompt(row: PanelIssue, *, max_issue_chars: int) -> str:
-    excerpt = row.text[: int(max_issue_chars)].strip()
+    txt = str(row.text or "").strip()
+    cap = int(max_issue_chars)
+    if cap > 0 and len(txt) > cap:
+        raise SystemExit(
+            f"issue_id={row.issue_id} chars={len(txt)} exceeds hard cap {cap}; no clipping allowed. "
+            "Increase the cap or set it to 0 for no local cap."
+        )
+    excerpt = txt
     return (
         "You are coding a single zoning-related newspaper regulation transcript.\n"
         "Return ONLY JSON (no markdown, no code fences).\n\n"
@@ -2150,7 +2164,12 @@ def _parse_args() -> argparse.Namespace:
         default=True,
         help="Write panels/selected_panel_issues.csv manifest.",
     )
-    ap.add_argument("--max-issue-chars", type=int, default=12000, help="Max chars per issue transcript passed to LLM prompts.")
+    ap.add_argument(
+        "--max-issue-chars",
+        type=int,
+        default=12000,
+        help="Hard cap for issue transcript text included in LLM prompts. 0 means no local cap. If positive and exceeded, the run fails (no clipping).",
+    )
 
     ap.add_argument("--run-llm", action="store_true", help="Run panel-vs-issue LLM comparison via agent-gateway.")
     ap.add_argument("--llm-model", default="gemini:gemini-2.5-flash", help="Gateway model string for LLM experiment.")
@@ -2164,12 +2183,12 @@ def _parse_args() -> argparse.Namespace:
     )
     ap.add_argument(
         "--gateway-runner",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/experimental/scripts/run_openai_requests_via_gateway.py",
+        default=str(Path(__file__).resolve().parents[1] / "scripts" / "run_openai_requests_via_gateway.py"),
         help="Path to run_openai_requests_via_gateway.py",
     )
     ap.add_argument(
         "--gateway-pythonpath",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/agent-gateway/src",
+        default=str(Path(__file__).resolve().parents[1] / "agent-gateway" / "src"),
         help="Path to add to PYTHONPATH for importing gateway package.",
     )
     ap.add_argument(

@@ -101,8 +101,14 @@ def _parse_args() -> argparse.Namespace:
     )
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=180.0)
-    ap.add_argument("--gateway-runner", default="/Users/saulrichardson/projects/newspapers/old-ocr/experimental/scripts/run_openai_requests_via_gateway.py")
-    ap.add_argument("--gateway-pythonpath", default="/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/agent-gateway/src")
+    ap.add_argument(
+        "--gateway-runner",
+        default=str(Path(__file__).resolve().parents[1] / "scripts" / "run_openai_requests_via_gateway.py"),
+    )
+    ap.add_argument(
+        "--gateway-pythonpath",
+        default=str(Path(__file__).resolve().parents[1] / "agent-gateway" / "src"),
+    )
     ap.add_argument("--gov-env-path", default=".env")
     ap.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--dry-run", action="store_true")

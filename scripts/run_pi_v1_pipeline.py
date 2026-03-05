@@ -47,11 +47,11 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--gov-env-path", default=".env")
     ap.add_argument(
         "--gateway-runner",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/experimental/scripts/run_openai_requests_via_gateway.py",
+        default=str(Path(__file__).resolve().parents[1] / "scripts" / "run_openai_requests_via_gateway.py"),
     )
     ap.add_argument(
         "--gateway-pythonpath",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/agent-gateway/src",
+        default=str(Path(__file__).resolve().parents[1] / "agent-gateway" / "src"),
     )
     ap.add_argument(
         "--run-section-llm",
@@ -75,7 +75,7 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     old_ocr_exp = Path("/Users/saulrichardson/projects/newspapers/old-ocr/experimental").resolve()
-    old_ocr_src = Path("/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/src").resolve()
+    old_ocr_src = Path("/Users/saulrichardson/projects/newspapers/old-ocr/src").resolve()
 
     # 1) Core scaling + contamination + open-coding bridge + numeric tables.
     _run(

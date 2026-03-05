@@ -360,11 +360,11 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--base-variant", default="B")
     ap.add_argument(
         "--gateway-runner",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/experimental/scripts/run_openai_requests_via_gateway.py",
+        default=str(Path(__file__).resolve().parents[1] / "scripts" / "run_openai_requests_via_gateway.py"),
     )
     ap.add_argument(
         "--gateway-pythonpath",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/agent-gateway/src",
+        default=str(Path(__file__).resolve().parents[1] / "agent-gateway" / "src"),
     )
     ap.add_argument("--gov-env-path", default=".env")
     ap.add_argument("--timeout", type=float, default=240.0)

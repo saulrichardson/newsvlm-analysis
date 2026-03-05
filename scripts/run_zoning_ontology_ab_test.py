@@ -206,16 +206,6 @@ def _parse_json_from_text(text: str) -> dict[str, Any] | None:
     return _try(repaired)
 
 
-def _clip_text(text: str, max_chars: int) -> tuple[str, bool]:
-    s = str(text or "")
-    if max_chars <= 0 or len(s) <= max_chars:
-        return s, False
-    head_n = int(max_chars * 0.7)
-    tail_n = max_chars - head_n
-    clipped = s[:head_n].rstrip() + "\n\n[...CLIPPED MIDDLE...]\n\n" + s[-tail_n:].lstrip()
-    return clipped, True
-
-
 def _make_openai_request(custom_id: str, prompt: str) -> dict[str, Any]:
     return {
         "custom_id": custom_id,
@@ -489,7 +479,12 @@ def _parse_args() -> argparse.Namespace:
         default="/Users/saulrichardson/projects/newspapers/newspaper-analysis/prompts/zoning_issue_classifier_prompt_v2_ontology.txt",
     )
     ap.add_argument("--model", default="gemini:gemini-2.5-flash")
-    ap.add_argument("--max-issue-chars", type=int, default=120000)
+    ap.add_argument(
+        "--max-issue-chars",
+        type=int,
+        default=120000,
+        help="Hard cap for issue text included in prompts. 0 means no local cap. If positive and exceeded, the run fails (no clipping).",
+    )
     ap.add_argument("--max-concurrency", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--max-retries", type=int, default=2)
@@ -497,11 +492,11 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
         "--gateway-runner",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/experimental/scripts/run_openai_requests_via_gateway.py",
+        default=str(Path(__file__).resolve().parents[1] / "scripts" / "run_openai_requests_via_gateway.py"),
     )
     ap.add_argument(
         "--gateway-pythonpath",
-        default="/Users/saulrichardson/projects/newspapers/old-ocr/newspaper-parsing-local/agent-gateway/src",
+        default=str(Path(__file__).resolve().parents[1] / "agent-gateway" / "src"),
     )
     ap.add_argument("--gov-env-path", default=".env")
     return ap.parse_args()
@@ -547,11 +542,16 @@ def main() -> None:
         issue_text = _norm_str(getattr(r, "text", ""))
         if not issue_id or not issue_text:
             continue
-        clipped_text, was_clipped = _clip_text(issue_text, int(args.max_issue_chars))
+        max_issue_chars = int(args.max_issue_chars)
+        if max_issue_chars > 0 and len(issue_text) > max_issue_chars:
+            raise SystemExit(
+                f"issue_id={issue_id} chars={len(issue_text)} exceeds hard cap {max_issue_chars}; no clipping allowed. "
+                "Re-run with --max-issue-chars 0 (no cap) or increase the cap."
+            )
 
         row_s = pd.Series(r._asdict())
-        pa = _build_variant_prompt(variant="A", prompt_text=prompt_a, row=row_s, issue_text=clipped_text)
-        pb = _build_variant_prompt(variant="B", prompt_text=prompt_b, row=row_s, issue_text=clipped_text)
+        pa = _build_variant_prompt(variant="A", prompt_text=prompt_a, row=row_s, issue_text=issue_text)
+        pb = _build_variant_prompt(variant="B", prompt_text=prompt_b, row=row_s, issue_text=issue_text)
 
         cid_a = f"ab::A::{issue_id}"
         cid_b = f"ab::B::{issue_id}"
@@ -564,7 +564,7 @@ def main() -> None:
                 "classification_label": _norm_str(getattr(r, "classification_label", "")),
                 "manual_bucket": _norm_str(getattr(r, "manual_bucket", "")),
                 "text_chars_actual": _safe_int(getattr(r, "text_chars_actual", 0)),
-                "text_was_clipped": int(was_clipped),
+                "text_was_clipped": 0,
                 "prompt_chars_a": len(pa),
                 "prompt_chars_b": len(pb),
             }
