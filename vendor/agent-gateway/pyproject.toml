@@ -1,0 +1,76 @@
+[project]
+name = "gateway"
+version = "0.1.0"
+description = "LLM gateway service"
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "fastapi (>=0.121.0,<0.122.0)",
+    "uvicorn[standard] (>=0.38.0,<0.39.0)",
+    "httpx (>=0.28.1,<0.29.0)",
+    "pydantic-settings (>=2.11.0,<3.0.0)",
+    "structlog (>=25.5.0,<26.0.0)",
+    "tenacity (>=9.1.2,<10.0.0)",
+    "numpy (>=1.24.0,<3.0.0)",
+    "opencv-python-headless (>=4.10.0.84,<5.0.0)",
+    "scikit-image (>=0.24.0,<0.25.0)"
+]
+
+[tool.poetry]
+packages = [{include = "gateway", from = "src"}]
+
+[project.scripts]
+gateway = "gateway.__main__:main"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = "scratchpad/.*"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+lint.select = ["A", "B", "C", "E", "F", "I", "N", "UP", "W"]
+lint.ignore = ["E203", "B008"]
+extend-exclude = ["scratchpad"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+strict_equality = true
+show_error_codes = true
+pretty = true
+exclude = ["tests/.*", "scratchpad/.*"]
+
+[tool.coverage.run]
+branch = true
+source = ["gateway"]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "black (>=25.9.0,<26.0.0)",
+    "ruff (>=0.14.3,<0.15.0)",
+    "mypy (>=1.18.2,<2.0.0)",
+    "pre-commit (>=4.3.0,<5.0.0)"
+]

@@ -1,0 +1,124 @@
+\documentclass[11pt]{article}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{geometry}
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue]{hyperref}
+\geometry{margin=1in}
+
+\title{Abilene Historical Zoning Workflow}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Summary}
+I am piloting a VLM-centric parsing pipeline for historical newspapers, inspired by
+Reducto’s vision that spatially aware models can outperform traditional OCR in noisy
+layouts. This Abilene sheet serves as the proving ground: I cleaned the scan, assigned
+stable glyph identifiers, probed LLM reading-order reasoning, and reconciled the zoning
+inset with modern TIGER shapefiles and satellite context. The sections below walk through
+those stages and the artifacts they produced.
+
+\section*{Workflow}
+\subsection*{Stage 1: Original Radiance Sheet}
+We begin with the raw scan and perform light normalization only to preserve every stroke
+that will later inform both contour extraction and glyph segmentation (Figure~\ref{fig:original}).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/original.png}
+    \caption{Stage 1 --- Original radiance scan of the Abilene zoning sheet before any processing.}
+    \label{fig:original}
+\end{figure}
+
+\subsection*{Stage 2: Global Contours (Counters)}
+Running a deskew-and-threshold pass yields a binary field where I can trace contours of
+the underlying zoning map. The resulting contour field captures line geometry, not text
+regions, and serves as the backbone for later alignment to TIGER data (Figure~\ref{fig:contours}).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/original_contours.png}
+    \caption{Stage 2 --- Global contour detection (\emph{aka} counters) across the full sheet.}
+    \label{fig:contours}
+\end{figure}
+
+\subsection*{Stage 3: Numbered Bounding Boxes \& Reading Order}
+Separately, we run connected-component analysis on the binarized glyph layer to carve out
+axis-aligned bounding boxes for every text fragment. Unlike the contours above (which hug
+strokes), these boxes are derived from grouped glyph pixels and produce clean regions that
+can be indexed. The enumeration proceeds left-to-right within each horizontal band, and
+my inspection shows the numbering is already reliable—the ambiguity lies in knowing when
+to stop scanning a row, hop to an inset, or resume mid-column. To probe that uncertainty,
+I fed the box coordinates plus cropped thumbnails into an LLM, asking it to emit the
+reading order and justify each transition. The long-term plan is to mirror Reducto’s
+chunk-and-compose strategy: let a VLM partition the sheet into semantically coherent
+panels, run localized extraction on each chunk, and then stitch the outputs back together
+using the glyph numbering as the spine so that the final sequence reflects how a human
+would navigate the page (Figures~\ref{fig:numbered} and~\ref{fig:numbered-detail}).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/numbered/page_glyphs_numbered.png}
+    \caption{Stage 3 --- All bounding boxes numbered so each glyph region can be referenced downstream.}
+    \label{fig:numbered}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.75\textwidth]{page_glyphs_numbered_zoom.png}
+    \caption{Stage 3 (detail) --- Zoomed section of the numbered page showing the exact crop sent to the VLM with coordinates.}
+    \label{fig:numbered-detail}
+\end{figure}
+
+\subsection*{Stage 4: Zoning Inset Contours}
+With glyph IDs locked in, we manually crop to the zoning inset and re-run the contour pass
+so the geometry within the map panel is isolated from the rest of the sheet (Figure~\ref{fig:map-contours}).
+In principle a VLM could pick these cut points automatically, which is part of the future
+direction for reducing human-in-the-loop steps.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/zoning_map_original_lowerleft/zoning_contours.png}
+    \caption{Stage 4 --- Contours from the extracted zoning map inset after cropping.}
+    \label{fig:map-contours}
+\end{figure}
+
+\subsection*{Stage 5: Contours Meets Shapefile}
+The isolated contours are intersected with the TIGER shapefile outline to check scale,
+orientation, and topology before committing to a full overlay. The first pass quickly
+surfaced the obvious blockers: the historic scan lacks projection control points, the scale
+is off, and the inset is skewed relative to modern north-up geometry (Figure~\ref{fig:contours-shapefile}).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/zoning_map_original_lowerleft/contours_plus_shapefile.png}
+    \caption{Stage 5 --- Historical contours overlain on the shapefile outline to validate the geometry.}
+    \label{fig:contours-shapefile}
+\end{figure}
+
+\subsection*{Stage 6: Shapefile on Original Map}
+After verifying the inset alignment, we cast the shapefile edges back over the original
+sheet to check global positioning and ensure that the inset registration carries over to
+the full composition (Figure~\ref{fig:map-shapefile}).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/zoning_map_original_lowerleft/abilene_outline_overlay.png}
+    \caption{Stage 6 --- Shapefile outline reprojected directly on the original map for a full-page check.}
+    \label{fig:map-shapefile}
+\end{figure}
+
+\subsection*{Stage 7: Satellite Validation}
+Finally, we blend the red historical overlay and shapefile edges with a satellite basemap
+to confirm that the digitized geometry lands where modern Abilene exists today (Figure~\ref{fig:satellite}).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{../src/scratchpad/agentic_outputs/abilene/zoning_map_original_lowerleft/satellite_with_zoning_red.png}
+    \caption{Stage 7 --- Satellite basemap with the red historical overlay and shapefile edges to verify present-day alignment.}
+    \label{fig:satellite}
+\end{figure}
+
+\end{document}

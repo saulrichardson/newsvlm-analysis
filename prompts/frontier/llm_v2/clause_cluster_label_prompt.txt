@@ -1,0 +1,24 @@
+You are labeling a semantic cluster of regulatory clauses into one coherent regulatory instrument family.
+
+Goal
+- Produce a concise instrument-family label and description for the cluster.
+- Use only the representative clauses and structured metadata.
+
+Critical rules
+- Do NOT invent facts not present in the representative clauses.
+- Prefer specific implementation-oriented labels over generic labels.
+- Label should be 2-8 words.
+- Description should explain the common regulatory instrument or rule family in 1-3 sentences.
+- Keywords should be useful for search/indexing.
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- CLUSTER_ID
+- CLUSTER_SIZE
+- REPRESENTATION_LEVEL
+- REPRESENTATIVE_TEXTS
+- INSTRUMENT_TYPE_COUNTS
+- MOTIVE_COUNTS
+- MODALITY_COUNTS

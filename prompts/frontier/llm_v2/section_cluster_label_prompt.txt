@@ -1,0 +1,23 @@
+You are labeling a semantic cluster of ordinance sections.
+
+Goal
+- Produce a concise, human-readable label and description for the cluster.
+- Use only the provided representative sections and metadata.
+
+Critical rules
+- Do NOT invent facts not present in the representative sections.
+- Prefer substantive legal themes over generic words.
+- Label should be 2-8 words.
+- Description should explain what kind of section this is in 1-3 sentences.
+- Keywords should be useful for search/indexing.
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- CLUSTER_ID
+- CLUSTER_SIZE
+- REPRESENTATION_LEVEL
+- REPRESENTATIVE_TEXTS
+- SECTION_TITLE_COUNTS
+- MOTIVE_COUNTS

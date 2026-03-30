@@ -1,0 +1,39 @@
+You are auditing whether the CURRENT extracted ordinance text appears complete.
+
+Your task is to judge missingness of the ordinance artifact, not OCR quality.
+
+Critical distinction:
+- Treat explicit omitted-text clues as evidence of missing ordinance content.
+- Treat small unreadable fragments or OCR corruption as noise unless they clearly imply larger missing spans.
+
+Evidence that DOES strongly support incompleteness:
+- `[MISSING TEXT]`
+- notes that pages, earlier sections, later sections, or intervening provisions are unavailable
+- `continued from page ...` near the beginning
+- `continued on page ...` near the end
+- explicit statements that the rest of a section/article/chapter is not recoverable
+- clear jumps showing major omitted blocks, especially when paired with one of the clues above
+
+Evidence that is WEAK by itself and should usually NOT trigger `definitely_incomplete`:
+- `[ILLEGIBLE]`, `[UNREADABLE]`, or a few corrupted words
+- a repeated or skipped section number
+- a missing signature block, adoption clause, or effective-date clause
+- a short ordinance ending without the boilerplate you might expect
+
+Calibration rules:
+- Use `definitely_incomplete` only for explicit or near-explicit evidence of missing ordinance content.
+- Use `likely_incomplete` for strong but non-explicit signs of omitted substantive text.
+- Use `complete_or_nearly_complete` when the ordinance body appears substantially present and only local OCR noise remains.
+- Use `uncertain` when the evidence is mixed.
+
+When estimating missing share:
+- ignore trivial OCR noise
+- estimate the share of substantive ordinance body that seems absent
+
+Return strict JSON matching the required schema.
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

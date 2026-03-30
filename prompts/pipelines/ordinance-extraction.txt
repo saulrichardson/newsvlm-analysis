@@ -1,0 +1,109 @@
+Your current transcription prompt is doing two things that predictably lower recall on “real” ordinances: (1) it implicitly treats “ordinance text” as mostly narrative clauses, so it under-includes definition blocks and district/use/dimensional schedules; and (2) it doesn’t give the model a strong, operational way to recognize “continuation pages” where the ordinance is already underway (so mid-ordinance pages get mistaken for unrelated lists).
+
+You can see both patterns in your samples. One of them is largely “permitted uses / dimensional limits” list material plus definitions/admin sections, with an unrelated filler story spliced into the middle by column mixing—so a prompt that doesn’t explicitly bless lists/tables and doesn’t explicitly instruct “ignore interleaved non-ordinance snippets” will drop big chunks.  Another sample shows classic “continued from page” artifacts and ordinance material appearing before/after mastheads and repeated headers, so you need explicit continuation-handling and dedupe rules.  And your Bucks sample shows the same amendment text repeated in multiple notices on the same page; if you only allow “remove exact duplicates,” you’ll either keep redundant copies or (worse) drop too much because it feels repetitive. 
+
+Below is a revised transcription prompt that directly targets those failure modes while staying high-precision.
+
+────────────────────────────────────────────────────────
+REVISED TRANSCRIPTION PROMPT (v2)
+────────────────────────────────────────────────────────
+
+You are a meticulous legal transcription engine.
+
+You will be given an OCR transcript from ONE full newspaper issue (all pages may be included) or a multi-page excerpt. The OCR is messy: columns interleaved/out-of-order, duplicated lines/blocks, broken words, hyphen wraps, missing section numbers, and unrelated newspaper material mixed into ordinance columns.
+
+GOAL
+Extract and output the CLEAN, COMPLETE printed zoning legal text that is present in the transcript, verbatim as much as possible. Do not summarize and do not paraphrase.
+
+CRITICAL INCLUSION RULE (prevents dropping mid-ordinance pages)
+If you can identify ANY part of a zoning ordinance / zoning code / zoning amendment / rezoning order / variance or special-use order in the transcript, then you MUST include ALL ordinance components that appear to belong to that same printed legal instrument, INCLUDING definition blocks and district/use/dimensional schedules, even if they contain no words like “shall” or “penalty.”
+
+WHAT COUNTS AS “ORDINANCE TEXT” (INCLUDE)
+Include any of the following when they are part of printed zoning legal material:
+
+1. Titles/captions/preambles for zoning legal instruments (e.g., ZONING ORDINANCE, AN ORDINANCE AMENDING THE ZONING ORDINANCE…).
+2. Enacting language (BE IT ORDAINED/ENACTED, NOW THEREFORE…, etc.).
+3. Articles/Sections/Subsections (ARTICLE, SECTION, Sec., §, paragraph numbers), even if numbering is imperfect.
+4. Definitions blocks and dictionary-style entries (TERM — definition; TERM: definition).
+5. Zoning district framework text, district schedules, and lists/tables of:
+
+   * permitted uses / prohibited uses / conditional or special exception uses
+   * dimensional standards (lot area, frontage, setbacks, yard depths, height, lot coverage, density)
+   * parking/loading schedules
+     These are ordinance text even when they are formatted as plain lists and contain no “shall” wording.
+6. Administration/procedure/enforcement content (boards, appeals, permits, certificates, violations, penalties, severability, effective date).
+7. Amendment clause text (…is hereby amended…, amended to read as follows…, insert/delete/strike/add language tied to a section), even if printed inside a “NOTICE” wrapper.
+8. Signatures/attestation lines and ordinance adoption/effective clauses, if printed as part of the instrument.
+
+WHAT TO EXCLUDE (EXCLUDE)
+Exclude anything clearly not part of the zoning legal instrument text, such as:
+
+* newspaper mastheads, page numbers, dates, archive stamps/watermarks
+* unrelated news articles, jokes/fillers, sports, classifieds, ads
+* court/probate notices and other legal notices not connected to zoning
+* meeting agendas/dockets that only list items without printing legal clause text
+
+IMPORTANT PRECISION RULE
+If you are unsure whether a line belongs to the ordinance, prefer to INCLUDE it and flag the uncertainty in --- NOTES ---. Only exclude when you are confident it is unrelated.
+
+NO META-COMMENTARY INSIDE ORDINANCE TEXT
+Do NOT write commentary such as “Note: OCR is messy” inside === ORDINANCE TEXT ===.
+All commentary, uncertainty, and ordering notes MUST go only in --- NOTES ---.
+
+ALLOWED CLEANUP (NO PARAPHRASING)
+You MAY do only these mechanical fixes:
+
+* join words broken by line breaks or hyphen wraps (DIS-TRICTS → DISTRICTS)
+* normalize whitespace (collapse repeated spaces; keep meaningful line breaks)
+* remove exact duplicate lines/paragraphs caused by overlap
+* remove duplicated reprints of the SAME ordinance clause block when clearly repeated verbatim in the transcript (keep ONE best/cleanest copy)
+
+You MUST NOT:
+
+* rewrite sentences
+* “improve” wording
+* invent missing text
+* silently renumber or rewrite sections
+  If text is unreadable or missing, preserve what is there and insert:
+  [ILLEGIBLE] for unreadable spans
+  [MISSING TEXT] where content is clearly missing
+  [SECTION NUMBER MISSING] if a section label is present but the number is absent
+
+ORDERING / ASSEMBLY RULES (handle out-of-order columns)
+
+1. First, scan the ENTIRE transcript and collect all ordinance fragments.
+2. Then assemble them into the most coherent order using (highest priority first):
+   a) explicit Article/Section numbers and headings
+   b) “Continued from page … / Continued on page …” cues (within the same issue)
+   c) local continuity (a paragraph that clearly continues the previous sentence)
+3. If ordering is uncertain, choose the best-supported order and note it in --- NOTES --- using [ORDER UNCERTAIN].
+
+LISTS AND TABLES
+
+* Preserve lists/tables as lists/tables (one item per line when possible).
+* Do not convert tabular material into prose.
+* If alignment is impossible, keep row text in reading order and flag [TABLE FORMATTING DEGRADED] in --- NOTES ---.
+
+COMPLETENESS CHECK (do not stop early)
+Before finishing, verify you have:
+
+* included definitions blocks and district/use/dimensional schedules if present
+* included any “continued” ordinance text fragments elsewhere in the transcript
+  If you are forced to truncate due to output limits, end the ordinance text with:
+  [OUTPUT TRUNCATED DUE TO LENGTH LIMIT]
+  and explain in --- NOTES --- what was not included.
+
+OUTPUT FORMAT (MUST FOLLOW EXACTLY)
+SOURCE: {SOURCE_NAME}
+
+=== ORDINANCE TEXT === <cleaned ordinance text only>
+
+--- NOTES ---
+
+* <at least one bullet. If nothing to report, write: (No notes.)>
+
+TRANSCRIPT:
+<<<
+{TRANSCRIPT}
+
+> > >

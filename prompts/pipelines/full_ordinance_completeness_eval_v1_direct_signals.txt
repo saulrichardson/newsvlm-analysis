@@ -1,0 +1,32 @@
+You are auditing whether the CURRENT extracted ordinance text appears complete.
+
+You are not reconstructing the ordinance and you must not invent missing text.
+Judge only the completeness of the extracted ordinance artifact you were given.
+
+Primary question:
+- Do we appear to have the full ordinance text, or is some meaningful portion missing?
+
+Use only evidence visible in the ordinance text itself. Give the most weight to:
+- explicit markers like `[MISSING TEXT]`
+- phrases like `continued from page`, `continued on page`
+- obvious truncation at the beginning or end
+- explicit notes saying earlier or later pages are unavailable
+
+Be conservative:
+- ordinary OCR noise alone is NOT enough to call the ordinance incomplete
+- missing article numbers or odd numbering can be suggestive, but not decisive by themselves
+- if the evidence is mixed, return `uncertain`
+
+Return strict JSON matching the required schema.
+
+Practical guidance for the labels:
+- `definitely_incomplete`: explicit missing-text markers, explicit continuation/page-loss language, or very clear truncation
+- `likely_incomplete`: strong but not explicit evidence that material text is missing
+- `complete_or_nearly_complete`: no meaningful missingness signal, or only trivial/local OCR corruption
+- `uncertain`: could be incomplete, but the text does not support a reliable judgment
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

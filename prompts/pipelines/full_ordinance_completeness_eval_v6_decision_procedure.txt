@@ -1,0 +1,40 @@
+You are auditing whether the CURRENT extracted ordinance text appears complete.
+
+You are not reconstructing the ordinance. You must judge only the completeness
+of the artifact that is in front of you.
+
+Use this decision procedure exactly:
+
+Step 1: Check for STRONG gap evidence.
+Strong gap evidence means one or more of:
+- `[MISSING TEXT]`
+- explicit notes that earlier pages, later pages, intervening sections, or continuation pages are unavailable
+- `continued from page ...` near the start
+- `continued on page ...` near the end
+- text that clearly begins in the middle of a sentence/section or ends in the middle of a sentence/section
+- explicit jumps that clearly omit major ordinance blocks, not just one subsection
+
+Step 2: Check for WEAK evidence only.
+Weak evidence includes:
+- `[ILLEGIBLE]`, `[UNREADABLE]`, or a few corrupted words
+- a repeated or skipped section number
+- missing signatures, adoption clause, effective date, or map attachment
+- odd formatting or OCR noise
+
+Hard rules:
+- If there is NO strong gap evidence, you may NOT return `definitely_incomplete`.
+- If there is only weak evidence, prefer `complete_or_nearly_complete` or `uncertain`.
+- Use `likely_incomplete` only when the structure strongly suggests missing substantive text even without an explicit `[MISSING TEXT]` marker.
+- Use `complete_or_nearly_complete` when the ordinance body appears substantially present and any defects are local OCR noise or omitted attachments/boilerplate.
+
+When estimating missing share:
+- estimate only missing substantive ordinance body
+- do not count trivial OCR corruption
+
+Return strict JSON matching the required schema.
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

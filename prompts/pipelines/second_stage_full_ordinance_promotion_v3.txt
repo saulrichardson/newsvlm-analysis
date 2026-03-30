@@ -1,0 +1,142 @@
+Task
+You are reviewing ONE complete newspaper issue transcript that has already been surfaced from a non-full-code zoning-law bucket.
+
+This is a SECOND-STAGE promotion task. Your only aggressive action is to upgrade hidden true full ordinances. Everything else should stay non-full or not-applicable.
+
+Primary goal
+Maximize precision for:
+- full_ordinance_text
+
+Output format requirements
+- Output EXACTLY ONE valid JSON object matching the schema below.
+- Output must be a SINGLE LINE: no newline or carriage-return characters anywhere.
+- Do not use markdown, code fences, or backticks.
+- Do not output multiple JSON objects.
+- Do not include the double-quote character inside ANY string value, including rationale and evidence_quote. If the source contains quotes, omit them or replace them with apostrophes.
+- Keep evidence_quote short, preferably 260 characters or less.
+- Replace any line breaks from the transcript with spaces.
+
+Promotion mindset
+Start from KEEP NON-FULL.
+Only switch to full_ordinance_text if the issue clearly passes a high bar for a broad comprehensive zoning ordinance publication.
+
+Ontology
+Allowed second_stage.class values:
+- full_ordinance_text
+- other_applicable_zoning_law
+- not_applicable_printed_zoning_law
+- uncertain
+
+Allowed second_stage.instrument_family values:
+- full_code_publication
+- code_excerpt_or_installment
+- amendment
+- limited_scope_ordinance
+- map_rezoning
+- variance_special_use
+- notice_or_summary_only
+- narrative_or_quote_only
+- non_zoning_ordinance
+- uncertain
+
+Allowed second_stage.operativity values:
+- operative
+- proposed
+- unclear
+- none
+
+High bar for promotion
+Promote to full_ordinance_text only when the issue looks like a broad zoning ordinance publication for the jurisdiction as a whole.
+
+To promote, you should usually be able to point to ALL of the following:
+- publication framing such as zoning ordinance or zoning code title,
+- broad structure such as multiple articles or sections,
+- district or map framework,
+- more than one substantive component such as uses plus dimensions plus administration or enforcement,
+- no better narrower explanation.
+
+Narrower explanations that defeat promotion
+If any of these better describes the issue, keep it out of full_ordinance_text:
+- code excerpt or installment only,
+- amendment,
+- limited-scope ordinance,
+- rezoning/map change,
+- variance/special-use order,
+- notice or summary only,
+- narrative or quoted snippets,
+- non-zoning ordinance.
+
+Special caution on false fulls
+Do NOT promote just because the issue is:
+- long,
+- formal,
+- enacted,
+- printed as legal notice,
+- full of numbered sections.
+
+Those features are not enough by themselves because specialized regimes amendments and non-zoning ordinances can also look that way.
+
+Frequent false-promotion traps
+- sign ordinances,
+- flood control or flood hazard ordinances,
+- airport zoning,
+- subdivision regulations,
+- fire or building code amendments,
+- mobile home or trailer regulations,
+- site-specific rezoning ordinances,
+- hearing notices quoting ordinance sections,
+- summaries that say they are summaries or not complete.
+
+Allowance for proposed comprehensive ordinances
+If the issue truly prints a broad comprehensive zoning ordinance, it may still be full_ordinance_text even if proposed rather than operative.
+
+Other applicable zoning law
+Use other_applicable_zoning_law when the issue prints real zoning law but is not a broad comprehensive ordinance publication.
+
+Not applicable
+Use not_applicable_printed_zoning_law when the issue does not actually print usable zoning law.
+
+full_ordinance_signals
+Set these booleans based only on printed text in the issue:
+- official_publication_framing:
+  ordinance/code publication framing is explicit
+- broad_code_structure:
+  multiple sections/articles or similarly broad structured ordinance text are printed
+- district_framework_present:
+  districts zone map framework or broad zoning framework is printed
+- multiple_substantive_components_present:
+  at least two of the following appear in printed ordinance text:
+  use rules dimensional rules administration/boards enforcement/penalties definitions
+
+Quality flags
+Allowed values only:
+- mixed_issue_content
+- possible_non_zoning_text
+- ocr_noise
+- comprehensive_but_partial_issue
+- broad_publication_but_status_unclear
+
+JSON schema template
+{"second_stage":{"class":"uncertain","instrument_family":"uncertain","operativity":"unclear","confidence_0_to_1":0.0,"evidence_quote":""},"full_ordinance_signals":{"official_publication_framing":false,"broad_code_structure":false,"district_framework_present":false,"multiple_substantive_components_present":false},"quality_flags":[],"rationale":""}
+
+Consistency constraints
+- If second_stage.class = full_ordinance_text:
+  - instrument_family must be full_code_publication
+  - second_stage.operativity must not be none
+  - at least three of the four full_ordinance_signals must be true and the rationale must explain why narrower explanations are worse fits
+- If second_stage.class = other_applicable_zoning_law:
+  - instrument_family must be one of code_excerpt_or_installment|amendment|limited_scope_ordinance|map_rezoning|variance_special_use
+  - second_stage.operativity must not be none
+- If second_stage.class = not_applicable_printed_zoning_law:
+  - instrument_family must be one of notice_or_summary_only|narrative_or_quote_only|non_zoning_ordinance
+- If second_stage.class = uncertain:
+  - instrument_family may be uncertain
+
+Decision procedure
+1) Ask whether the issue prints usable zoning law at all.
+2) Start from keeping the issue non-full.
+3) Promote only if the high bar is clearly satisfied.
+4) Otherwise assign the best narrower family or not-applicable bucket.
+5) Set operativity, signals, flags, and rationale conservatively.
+
+Return the single-line JSON object only.

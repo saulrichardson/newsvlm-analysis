@@ -1,0 +1,83 @@
+You are auditing whether the CURRENT extracted ordinance text is actually the
+full ordinance text, not merely whether it is readable.
+
+Judge only the artifact you were given. Do not reconstruct missing language.
+
+Use this procedure:
+
+1. Look for explicit page-loss / truncation evidence.
+This includes:
+- `[MISSING TEXT]`
+- explicit notes that earlier pages, later pages, intervening sections, or
+  continuation pages are unavailable
+- `continued from page ...` near the start
+- `continued on page ...` near the end
+- text that clearly begins or ends in the middle of a sentence, section, or
+  article
+- explicit jumps that clearly omit major ordinance blocks
+
+If any of those are present, return `definitely_incomplete`.
+
+2. If there is no explicit page-loss evidence, decide what kind of publication
+this is.
+
+Case A. Full ordinance text:
+- formal ordinance title and enacting clause
+- continuous article/section structure
+- body is written as legislative text, not merely a digest
+
+Case B. Summary / digest / abstract of an ordinance:
+- the text explicitly calls itself a `summary`, `summary of ordinance`,
+  `abstract`, `digest`, `enumeration`, or similar
+- but the artifact still contains substantial article-by-article or
+  section-by-section ordinance content
+
+Case C. Adopting ordinance plus externalized substantive text:
+- the text says the actual code or codified ordinances exist in a separate book,
+  attached copy, or external text
+- and the printed material here is only a summary or enumeration of new matter
+
+Map these cases to labels:
+- Case A with only weak defects -> `complete_or_nearly_complete`
+- Case B -> `likely_incomplete`
+- Case C -> `definitely_incomplete`
+
+3. If none of the above applies and the only evidence is indirect structure
+suspicion:
+- repeated/skipped subsection numbers
+- a zone section being shorter than neighboring zone sections
+- the ordinance ending at a place where you might have expected more
+
+then use `uncertain`, not `complete_or_nearly_complete` and not
+`likely_incomplete`, unless the current text itself clearly states that more
+substantive material should be present.
+
+Weak evidence only:
+- `[ILLEGIBLE]`, `[UNREADABLE]`, or a few corrupted words
+- a repeated or skipped section number by itself
+- missing signatures, adoption clause, effective date, or map attachment
+- odd formatting or OCR noise
+
+Hard rules:
+- Do not infer incompleteness from omitted zoning maps or referenced attachments
+  alone.
+- Do not infer incompleteness just because neighboring zones elsewhere in the
+  ordinance have more subsections.
+- If there is no explicit page-loss evidence and no summary/external-text
+  evidence, you may NOT return `definitely_incomplete`.
+- If the artifact is explicitly a summary/digest but still contains substantial
+  ordinance text, prefer `likely_incomplete`, not `definitely_incomplete`.
+
+When estimating missing share:
+- estimate only missing substantive ordinance body
+- do not count trivial OCR corruption
+- for summary/adopting-ordinance artifacts, estimate how much of the promised
+  substantive ordinance text appears absent from the artifact
+
+Return strict JSON matching the required schema.
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

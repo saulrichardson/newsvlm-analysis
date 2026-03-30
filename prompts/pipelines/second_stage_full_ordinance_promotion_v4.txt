@@ -1,0 +1,131 @@
+Task
+You are reviewing ONE complete newspaper issue transcript that has already been surfaced from a non-full-code zoning-law bucket.
+
+This is a SECOND-STAGE promotion task. Your only aggressive action is to upgrade hidden true full ordinances. Everything else should remain non-full or not-applicable.
+
+Primary goal
+Maximize precision for:
+- full_ordinance_text
+
+Output format requirements
+- Output EXACTLY ONE valid JSON object matching the schema below.
+- Output must be a SINGLE LINE: no newline or carriage-return characters anywhere.
+- Do not use markdown, code fences, or backticks.
+- Do not output multiple JSON objects.
+- Do not include the double-quote character inside ANY string value, including rationale and evidence_quote. If the source contains quotes, omit them or replace them with apostrophes.
+- Keep evidence_quote short, preferably 260 characters or less.
+- Replace any line breaks from the transcript with spaces.
+
+Key promotion principle
+Promote only from evidence visible in THIS transcript.
+Do not infer missing breadth from the fact that the text looks like part of a larger ordinance.
+
+Ontology
+Allowed second_stage.class values:
+- full_ordinance_text
+- other_applicable_zoning_law
+- not_applicable_printed_zoning_law
+- uncertain
+
+Allowed second_stage.instrument_family values:
+- full_code_publication
+- code_excerpt_or_installment
+- amendment
+- limited_scope_ordinance
+- map_rezoning
+- variance_special_use
+- notice_or_summary_only
+- narrative_or_quote_only
+- non_zoning_ordinance
+- uncertain
+
+Allowed second_stage.operativity values:
+- operative
+- proposed
+- unclear
+- none
+
+High bar for promotion
+Use full_ordinance_text only when the transcript itself visibly shows a broad comprehensive zoning ordinance publication.
+
+You should usually require ALL of the following:
+1) explicit ordinance or zoning code publication framing in the visible text,
+2) broad code structure visible in the transcript, not just one carried-over article or district section,
+3) district framework visible from at least two named zoning districts or an explicit zoning map/framework statement,
+4) multiple substantive components visible in the transcript, such as uses plus dimensional rules plus administration or enforcement,
+5) no better narrower explanation.
+
+Continuation rule
+If the transcript begins midstream, says continued from page, or otherwise looks like a fragment, do NOT promote unless the visible text still proves broad comprehensive scope by itself.
+
+Examples of continuation fragments that should stay non-full:
+- one district article plus yard or height rules,
+- one carried-over commercial district section,
+- one administrative article plus one district section,
+- one long article from a larger code without visible ordinance framing and broad framework.
+
+These should usually be other_applicable_zoning_law with instrument_family = code_excerpt_or_installment.
+
+Hard anti-promotion rules
+Do NOT promote when the visible transcript is better described as:
+- a code excerpt or installment,
+- a single amendment or replacement article,
+- a limited-scope ordinance such as signs flood control flood hazard airport zoning mobile homes trailer parks subdivision regulations hospital district or another narrow regime,
+- a site-specific rezoning map change variance or special-use order,
+- a hearing notice adoption summary synopsis highlights or abstract,
+- a narrative article editorial or quoted snippets in prose,
+- a non-zoning ordinance such as building fire housing traffic or oil-and-gas regulation.
+
+Allowance for proposed comprehensive ordinances
+A proposed comprehensive ordinance can still be full_ordinance_text if the transcript visibly prints the broad ordinance text itself.
+
+Other applicable zoning law
+Use other_applicable_zoning_law when the issue prints real zoning law but should not be promoted.
+
+Not applicable
+Use not_applicable_printed_zoning_law when the issue does not actually print usable zoning law.
+
+full_ordinance_signals
+Set these booleans based only on printed text in the issue:
+- official_publication_framing:
+  ordinance/code publication framing is explicit
+- broad_code_structure:
+  multiple sections/articles or similarly broad structured ordinance text are printed
+- district_framework_present:
+  districts zone map framework or broad zoning framework is printed
+- multiple_substantive_components_present:
+  at least two of the following appear in printed ordinance text:
+  use rules dimensional rules administration/boards enforcement/penalties definitions
+
+Quality flags
+Allowed values only:
+- mixed_issue_content
+- possible_non_zoning_text
+- ocr_noise
+- comprehensive_but_partial_issue
+- broad_publication_but_status_unclear
+
+JSON schema template
+{"second_stage":{"class":"uncertain","instrument_family":"uncertain","operativity":"unclear","confidence_0_to_1":0.0,"evidence_quote":""},"full_ordinance_signals":{"official_publication_framing":false,"broad_code_structure":false,"district_framework_present":false,"multiple_substantive_components_present":false},"quality_flags":[],"rationale":""}
+
+Consistency constraints
+- If second_stage.class = full_ordinance_text:
+  - instrument_family must be full_code_publication
+  - second_stage.operativity must not be none
+  - all four full_ordinance_signals should usually be true unless OCR damage clearly blocks one
+- If second_stage.class = other_applicable_zoning_law:
+  - instrument_family must be one of code_excerpt_or_installment|amendment|limited_scope_ordinance|map_rezoning|variance_special_use
+  - second_stage.operativity must not be none
+- If second_stage.class = not_applicable_printed_zoning_law:
+  - instrument_family must be one of notice_or_summary_only|narrative_or_quote_only|non_zoning_ordinance
+- If second_stage.class = uncertain:
+  - instrument_family may be uncertain
+
+Decision procedure
+1) Decide whether the transcript prints usable zoning law.
+2) Apply the high promotion bar using only visible evidence in the transcript.
+3) If the transcript looks like a fragment or continuation, do not infer missing breadth.
+4) Otherwise assign the best narrower family or not-applicable bucket.
+5) Set operativity, signals, flags, and rationale conservatively.
+
+Return the single-line JSON object only.

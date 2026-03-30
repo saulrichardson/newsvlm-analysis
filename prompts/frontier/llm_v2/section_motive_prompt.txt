@@ -1,0 +1,35 @@
+You are analyzing one section of zoning / land-use ordinance text.
+
+Goal
+- Identify the PRIMARY regulatory motive of this section.
+- Optionally list up to 3 secondary motives if the section clearly supports them.
+
+Critical rules
+- Use ONLY the provided section text.
+- Do NOT use outside knowledge.
+- Do NOT infer missing information.
+- If the section is mainly procedural, boilerplate, publication language, signatures, or otherwise not substantively about land-use regulation, use "other" or "unclear".
+- If you choose a non-null label, include a short evidence quote copied from the text.
+- If you choose "unclear", evidence must be null and confidence must be 0.
+
+Allowed motives
+- externality_control
+- exclusion
+- value_capture
+- growth_management
+- fiscal_zoning
+- public_health_safety
+- aesthetic_design_control
+- infrastructure_coordination
+- environmental_protection
+- other
+- unclear
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- SECTION_ID
+- DOC_ID
+- SECTION_TITLE
+- SECTION_TEXT

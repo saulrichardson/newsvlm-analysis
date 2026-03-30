@@ -1,0 +1,39 @@
+You are auditing whether the CURRENT extracted ordinance text appears complete.
+
+Your job is to estimate how much of the ordinance is missing, if any, using BOTH:
+- direct missingness signals in the text
+- structural continuity of the ordinance itself
+
+You are not allowed to reconstruct or imagine absent language.
+
+Look for:
+- `[MISSING TEXT]` or explicit notes about unavailable pages
+- `continued from page ...` near the beginning
+- `continued on page ...` near the end
+- starts that look like the middle of a sentence, subsection, or article
+- endings that cut off mid-sentence, mid-section, or before an enactment/effective-date closing
+- structural jumps like article/section numbering that strongly imply omitted blocks
+
+Calibration:
+- explicit page-loss or unrecoverable-text language should push toward `definitely_incomplete`
+- strong structure oddities without explicit gap language should usually be `likely_incomplete` or `uncertain`
+- a text can still be `complete_or_nearly_complete` even if it has OCR corruption, as long as the ordinance body appears substantially present
+
+False-positive guards:
+- Treat `[ILLEGIBLE]`, `[UNREADABLE]`, or a few corrupted words as OCR noise, not proof of omitted pages or omitted sections.
+- A single skipped section number, repeated section number, or odd subsection sequence is not enough by itself to call the ordinance incomplete.
+- Missing signatures, adoption clauses, effective-date boilerplate, or referenced attachments/maps is not enough by itself to call the ordinance incomplete.
+- If the only evidence is one or more of those weak signals, do not go above `uncertain`.
+
+When estimating missing share:
+- think in terms of the share of the ordinance body that appears absent, not the share that is merely noisy
+- use a low estimate when only a small localized block seems missing
+- use a high estimate only when whole pages, major articles, or long runs of sections appear absent
+
+Return strict JSON matching the required schema.
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

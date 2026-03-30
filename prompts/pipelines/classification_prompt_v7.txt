@@ -1,0 +1,203 @@
+Task
+You are classifying ONE complete newspaper issue transcript (all pages included). Your objective is HIGH PRECISION for printed zoning law.
+
+You must (1) detect whether any zoning content exists, (2) determine whether the issue prints clause-structured zoning legal instrument text, and (3) if it prints zoning instrument text, classify the type (full code publication vs excerpt vs amendment vs rezoning/variance order vs limited-scope ordinance). Separately indicate operativity (operative vs proposed) without changing the document type unless required by the full-code definition.
+
+Output format requirements (strict)
+
+1. Output exactly ONE valid JSON object matching the schema at the end.
+2. Output must be a SINGLE LINE: no newline or carriage-return characters anywhere in the output.
+3. Do not use markdown, code fences, or backticks.
+4. Do not output multiple JSON objects. Do not repeat the schema.
+5. Every evidence_quote must be exactly one JSON string (not a list). If you need multiple snippets, combine them into one string separated by space, three dots, space.
+6. Do not include the double-quote character inside ANY string value (including rationale and evidence_quote). If the source contains quotes, omit them or replace them with apostrophes.
+7. Keep evidence_quote short (prefer <= 240 characters). Replace any line breaks from the transcript with spaces.
+
+Hard constraints (precision-first)
+
+* Classify conservatively. If uncertain, pick the less-committal class.
+* Do NOT infer ordinance jurisdiction from the newspaper masthead, dateline, page headers, publication city, or general narrative context.
+* Extract ordinance_jurisdiction only if the issue contains an explicit governing-authority pattern (see Jurisdiction rules). Otherwise return unknown.
+* This is a full issue. “Continued from page … / continued on page …” is normal within-issue pagination and is NOT missingness by default.
+* “Full comprehensive code published in this issue” is rare. Only use it when the issue itself proves a self-contained publication event (start context + adoption/recodification context + substantial code content + completion/attestation/effective context).
+
+Core distinction: printed instrument text vs narrative/notice
+Zoning can appear without the law being printed. You MUST NOT treat narrative summaries, meeting minutes, captions, or agenda/docket listings as printed law.
+
+Definitions
+
+* Zoning anchor: explicit zoning-related terms such as zoning, zoning ordinance, zoning code, rezoning/rezone, zoning map, zoning district change (e.g., R-1 to C-1), Board of Adjustment/Zoning Board, Planning and Zoning Commission, variance, special exception, conditional/special use, planned development (PUD), overlay district.
+* Printed zoning legal instrument text: clause-structured ordinance/code/decision text printed in the issue (sections/articles, enacting clause, amendment formula, hereby/shall normative clauses, definitions, enforcement/penalties, official decision wording).
+* Zoning notice (no printed instrument text): hearing logistics, notice language, inspection/copy availability, publication logistics, first reading/introduced/agenda lists, ordinance captions/titles, without clause-structured ordinance/decision text.
+
+Strict printed-law gate (hard requirement for zoning_legal_text)
+You may set zoning_presence.primary_class = zoning_legal_text ONLY if BOTH are true:
+A) A zoning anchor is present.
+B) You can quote strong-form clause text from the issue (not narrative reporting, not caption-only, not a docket list). The zoning_presence.evidence_quote MUST contain this strong-form clause text.
+
+Strong-form clause proof (what qualifies)
+At least one of the following must appear in the zoning_presence.evidence_quote as printed clause text:
+
+1. Enacting/ordaining clause: “be it ordained”, “be it enacted”, “does ordain”, “hereby ordains/enacts”, “ordains as follows”, “now therefore” followed by ordain/enact language.
+2. True section clause: a section heading (e.g., “Section 1.” / “SECTION 1” / “Sec. 1” / “§ 1”) plus normative clause text such as “shall”, “hereby”, “is amended”, “is adopted”, “is repealed”, “is rezoned/changed”.
+3. Explicit amendment formula with substance: “is hereby amended”, “amended to read as follows”, “is amended by adding/deleting/striking”, with substantive clause text (not only a title).
+4. Formal written decision/order clause (variance/special use): official decision language such as “variance is hereby granted/denied”, “special exception/conditional use is hereby granted/denied”, “it is hereby ordered/resolved”, typically with board identity and appeal/procedure language, written as an instrument, not minutes.
+
+Hard blockers (these force NOT zoning_legal_text)
+If the issue has zoning anchors but does not print strong-form clause proof, then zoning_legal_text is forbidden. Use zoning_notice or zoning_discussion.
+The following are explicitly insufficient by themselves and must not be used as the only proof:
+
+* Brownsville-style agenda/docket lists: “Ord. No. ___: To Rezone From ___ to ___ …” or similar ordinance-number listings with short summaries, especially under first reading/consideration/hearing. This is NOT printed law without section/enacting/amendment clauses.
+* Caption-only text: “ORDINANCE NO. ___” or “AN ORDINANCE …” titles without sectioned/enacting/amendment clauses.
+* Narrative reporting: “an ordinance was introduced”, “council approved”, “ordinance will go into effect”, “general description of zones”, “series explaining the ordinance”, meeting minutes (“motion carried”, “approved a variation”), unless the actual clause text is printed.
+* Non-zoning ordinance contamination: if the only strong-form clause text in the issue is clearly non-zoning (traffic/health/bonds/etc.) and zoning appears only as notice/discussion, do NOT label zoning_legal_text.
+
+Notice override (do not miss printed amendment clauses inside notices)
+If a hearing notice page ALSO prints strong-form amendment clause text (e.g., “Amend Section …” / “is hereby amended …” with substantive clause text), then classify as zoning_legal_text and use the appropriate amendment_* class. Do not classify as zoning_notice/procedural_notice_only in that situation.
+
+Decision order (follow strictly)
+
+1. Determine zoning_presence.primary_class using the strict printed-law gate.
+2. Determine legal_document.class (or none/non_zoning_ordinance/uncertain).
+3. Determine legal_document.legal_action, operativity, scope.
+4. Extract ordinance_jurisdiction using the jurisdiction rules (text-only).
+5. Set code_components_present only from printed zoning code clauses (no inference from summaries/notices).
+6. Set confidence and quality_flags.
+
+Zoning presence classes
+
+* unrelated: no zoning anchors and no zoning content.
+* zoning_discussion: zoning anchors present, but only narrative/report/minutes; fails printed-law gate.
+* zoning_notice: zoning anchors present, primarily notice/agenda/hearing/first reading; fails printed-law gate.
+* zoning_legal_text: passes printed-law gate with strong-form clause proof.
+
+Legal document class (choose one)
+Allowed values:
+none|code_publication_full_issue|code_publication_excerpt_or_installment|amendment_substantial_text|amendment_targeted_text|zoning_ordinance_limited_scope|map_rezoning_order|variance_special_use_order|procedural_notice_only|non_zoning_ordinance|uncertain
+
+Rules:
+
+* If zoning_presence.primary_class = zoning_discussion: legal_document.class must be none (unless there is clearly a non-zoning ordinance text you want to tag; then non_zoning_ordinance).
+* If zoning_presence.primary_class = zoning_notice: legal_document.class should usually be procedural_notice_only (or non_zoning_ordinance if the only instrument text is non-zoning).
+* If zoning_presence.primary_class = zoning_legal_text: legal_document.class must not be none or procedural_notice_only or non_zoning_ordinance.
+
+Class definitions
+
+* code_publication_full_issue: self-contained publication of a comprehensive zoning code in this issue, with explicit adoption/recodification context tied to the printed code text, and broad code text showing at least 3 of 4 components (district framework, use rules, dimensional standards, procedures/enforcement/admin). Be conservative.
+* code_publication_excerpt_or_installment: code-scale zoning clauses are printed, but the issue does not prove a full self-contained publication event (missing clear adoption tie, missing completeness signals, or explicit continuation into another issue). Within-issue “continued from page …” does not by itself imply cross-issue installment.
+* amendment_substantial_text: explicit amendment with long replacement clause text, but limited in scope vs full code.
+* amendment_targeted_text: explicit amendment with small targeted clause change.
+* zoning_ordinance_limited_scope: printed zoning instrument that sets detailed standards/conditions for a special district/overlay/PUD/planned development or similarly limited regime; more than a simple parcel rezoning label change.
+* map_rezoning_order: printed ordinance/order that changes zoning district classification for specified parcels/areas AND passes the printed-law gate (not docket summaries).
+* variance_special_use_order: printed official decision/order granting/denying variance/special exception/conditional/special use AND passes the printed-law gate (not meeting minutes).
+* procedural_notice_only: zoning-related notice/hearing/agenda/inspection availability/first reading listings; no strong-form clause proof.
+* non_zoning_ordinance: instrument clause text is present but is not zoning; zoning (if any) is only notice/discussion.
+* uncertain: only if OCR/noise is so severe that even conservative classification cannot determine zoning presence/type.
+
+Legal action (separate axis; do not infer)
+Allowed values:
+none|adopt|recodify_replace|amend|rezone_map|variance_special_use|procedural_only|unknown
+
+Guidance:
+
+* procedural_notice_only => procedural_only
+* amendment_* => amend
+* map_rezoning_order => rezone_map
+* variance_special_use_order => variance_special_use
+* code_publication_* => adopt or recodify_replace only if explicit; else unknown
+
+Operativity (separate axis; explicit cues only)
+Allowed values: none|operative|proposed|unclear
+
+* operative cues: passed and adopted, duly enacted, approved, effective date clause, shall take effect, signatures/attestation; for variance decisions, final granted/denied in an official decision instrument can be operative if clearly final.
+* proposed cues: proposed, draft, introduced, first reading, to be considered, public hearing will be held, planning commission recommends, copy may be examined.
+* IMPORTANT for notices: a footer like “Published [date]” is usually the notice publication date, not adoption/effective. For zoning_notice/procedural_notice_only, default to proposed unless the text explicitly says adopted/passed/approved/effective.
+* If mixed/missing: unclear.
+
+Publication completeness (only relevant to code_publication_* classes)
+Field: legal_document.publication_completeness
+Allowed values: none|self_contained_in_issue|continues_beyond_issue|unknown
+Rules:
+
+* Use continues_beyond_issue ONLY if the issue explicitly says the printed text continues in another issue (e.g., “continued next week/next issue” or “will be published in subsequent issues”).
+* Do NOT treat “published for three weeks”, “after three publications”, or a list of publication dates as continues_beyond_issue; those are publication mechanics, not cross-issue text continuation.
+* If class is not code_publication_*: set publication_completeness = none.
+
+Scope normalization
+Allowed values only: none|citywide|district_wide|parcel_specific|mixed|unknown
+
+* citywide means jurisdiction-wide (even if the jurisdiction is a county/township/village).
+  Do not output other scope strings.
+
+Jurisdiction extraction (tightened; text-only)
+Only fill ordinance_jurisdiction if you can quote a governing-authority pattern from the issue’s printed legal material (ordinance text or official notice issuer line). The evidence_quote must contain the governing-authority pattern.
+Acceptable governing-authority patterns include phrases like:
+
+* “City of ___”, “Town of ___”, “Village of ___”, “Township of ___”, “Borough of ___”, “County of ___”, “State of ___”
+* “City Council of ___”, “Mayor and Council of ___”, “Board of Trustees of ___”, “Board of Commissioners of ___ County”, “Planning Commission of the City of ___” when clearly the governing/issuing authority
+  Insufficient by itself: “for Newark”, “in Newark”, or a newspaper narrative reference without a governing-authority pattern.
+  state_abbr must be 2-letter USPS uppercase (e.g., TX, NY, OH) or empty if not confidently derivable from explicit text.
+
+code_components_present (no inference)
+Set these booleans TRUE only when printed zoning code clauses clearly contain the component.
+
+* If zoning_presence.primary_class is zoning_notice, zoning_discussion, or unrelated: all four must be false.
+* If zoning_presence.primary_class is zoning_legal_text but the class is not code_publication_full_issue or code_publication_excerpt_or_installment: all four should usually be false unless the printed text is actually code-like and clearly contains the component.
+
+Components:
+
+* district_framework: district classifications/framework printed.
+* use_rules: permitted/prohibited/conditional uses printed.
+* dimensional_standards: lot size/setbacks/height/density/parking standards printed.
+* procedures_enforcement_admin: boards, permits, appeals, enforcement, penalties, definitions/admin printed.
+
+Quality flags (allowed values only; include zero or more)
+mixed_issue_content|possible_non_zoning_legal_text|insufficient_text_for_confident_full_code|ocr_noise|ambiguous_scope
+
+Calibration examples (do not quote these; use as guidance)
+
+* Brownsville-style docket list of “Ord. No. …: To Rezone …” under first reading/hearing with no sections/enacting clauses => zoning_notice + procedural_notice_only; operativity proposed.
+* Abilene “Zoning In Effect” narrative explanation/series describing zones without sections/enacting clauses => zoning_discussion + none.
+* Arcadia notice page that prints “Amend Section …” with clause text => zoning_legal_text + amendment_* (notice override).
+* Alamogordo issue with zoning notices plus a separate non-zoning ordinance that has strong-form sections/repeal language => zoning_notice (or discussion) with legal_document.class = non_zoning_ordinance; do not set zoning_legal_text unless strong-form zoning clauses are printed.
+* Meeting-minutes style “approved a variation / motion carried” => zoning_discussion + none unless an official decision instrument is printed.
+* Code text with “Continued from Page X” within the issue => can still be code_publication_*; within-issue continued is not cross-issue.
+
+JSON schema (single-line template; output must match keys exactly)
+{"zoning_presence":{"has_any_zoning_reference":false,"primary_class":"unrelated","confidence_0_to_1":0.0,"evidence_quote":""},"legal_document":{"class":"none","legal_action":"none","publication_completeness":"none","operativity":"none","scope":"none","confidence_0_to_1":0.0,"evidence_quote":""},"ordinance_jurisdiction":{"city":"","state_abbr":"","jurisdiction_level":"unknown","confidence_0_to_1":0.0,"evidence_quote":""},"code_components_present":{"district_framework":false,"use_rules":false,"dimensional_standards":false,"procedures_enforcement_admin":false},"quality_flags":[],"rationale":""}
+
+Consistency constraints (must follow)
+
+* If has_any_zoning_reference=false:
+
+  * primary_class must be unrelated
+  * legal_document.class must be none or non_zoning_ordinance
+  * legal_document.operativity must be none
+  * all code_components_present must be false
+* If primary_class = zoning_discussion:
+
+  * legal_document.class must be none
+  * legal_document.legal_action must be none
+  * legal_document.operativity must be none
+  * all code_components_present must be false
+* If primary_class = zoning_notice:
+
+  * legal_document.class should usually be procedural_notice_only (unless clearly non_zoning_ordinance)
+  * legal_document.legal_action must be procedural_only
+  * all code_components_present must be false
+* If primary_class = zoning_legal_text:
+
+  * zoning_presence.evidence_quote must include strong-form clause proof (not a docket/caption-only line)
+  * legal_document.class must not be none or procedural_notice_only or non_zoning_ordinance
+  * legal_document.legal_action must not be procedural_only
+* If legal_document.class = map_rezoning_order:
+
+  * legal_document.legal_action must be rezone_map (or unknown only if genuinely not explicit)
+* If legal_document.class = variance_special_use_order:
+
+  * legal_document.legal_action must be variance_special_use (or unknown only if genuinely not explicit)
+* If legal_document.class = code_publication_full_issue:
+
+  * add insufficient_text_for_confident_full_code if self-contained adoption/completeness is not clearly shown; in that case use code_publication_excerpt_or_installment instead.
+
+Return the single-line JSON object only.

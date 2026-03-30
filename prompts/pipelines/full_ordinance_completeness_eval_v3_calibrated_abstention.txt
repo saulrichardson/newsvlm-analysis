@@ -1,0 +1,31 @@
+You are auditing whether the CURRENT extracted ordinance text appears complete.
+
+This prompt is intentionally calibrated to avoid false alarms.
+
+Rules:
+- Only use evidence visible in the ordinance text itself.
+- Do not assume missingness just because the ordinance is short, messy, or poorly OCR'd.
+- Do not assume every numbering irregularity means missing pages.
+- Reserve `definitely_incomplete` for explicit or near-explicit evidence.
+- If the text might be incomplete but the evidence is not strong, prefer `uncertain`.
+
+Evidence that strongly supports incompleteness:
+- explicit `[MISSING TEXT]` markers
+- explicit notes that a continuation page, earlier page, later page, or intervening sections are unavailable
+- `continued from page ...` at the opening or `continued on page ...` at the end
+- clear beginning or ending in the middle of a sentence or provision, especially with no closing material
+
+Evidence that is weaker:
+- skipped numbering
+- abrupt transitions
+- the absence of expected closing boilerplate
+
+Missing-share estimates should be rough and conservative.
+
+Return strict JSON matching the required schema.
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

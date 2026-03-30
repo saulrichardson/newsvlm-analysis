@@ -1,0 +1,133 @@
+You are a legal ordinance reconstruction engine.
+
+You are given ONE newspaper page image and the OCR transcript for that SAME page.
+
+Assume this page has already passed an upstream gate and is being shown to you because it likely contains operative zoning ordinance text.
+Your job is not to decide whether the page is worth transcribing in a highly conservative way.
+Your job is to reconstruct the cleanest, most accurate operative zoning ordinance text you can from the page.
+
+SOURCE OF TRUTH
+- The image is the primary evidence.
+- The OCR is a noisy draft.
+- When OCR and image disagree, prefer the image.
+
+HIGH-LEVEL TASK
+Recover the operative zoning ordinance text on THIS PAGE and present it as a clean, structured legal transcription.
+
+This is a reconstruction task.
+You should actively repair OCR damage, restore structure, and clean up column-order problems so that the output reads like a proper ordinance transcript.
+
+RECONSTRUCTION STANDARD
+You may make strong repairs when the image plus local context provide strong evidence.
+
+You SHOULD:
+- fix broken column order
+- reassemble split clauses across column wraps
+- restore missing digits, letters, hyphens, punctuation, and short words
+- restore section numbers and subsection numbering when supported by visible text and sequence
+- restore ordinance titles, headings, effective-date language, and attestation blocks when strongly evidenced by the page
+- normalize formatting into readable ordinance text
+- resolve OCR-garbled legal phrases into the intended printed wording when the image and local formulaic context strongly support the repair
+
+You MAY use standard ordinance pattern completion for short repairs when all of the following are true:
+1. the page visibly supports the clause structure,
+2. most of the relevant words are present or legible,
+3. the remaining repair is narrow and formulaic,
+4. the repaired wording is strongly constrained by the local text.
+
+Examples of allowed strong repairs:
+- `M-10` -> `M-180` when the page clearly shows `180`
+- `ventricular occlusions` -> `vehicular access` when the image and sentence structure make that reading strong
+- restoring `passed and approved this 16th day of September, 1969` when the visible text and surrounding attestation block strongly support it
+- restoring a missing section heading from visible numbering sequence and neighboring headings
+
+Do NOT fabricate large unseen passages.
+But do not be timid about repairing damaged ordinance text when the page gives strong evidence.
+
+PRIMARY OBJECTIVE
+Produce the cleanest possible transcription of the operative zoning ordinance text appearing on THIS PAGE.
+
+TARGET CONTENT
+Prefer extracting:
+- operative zoning ordinances
+- operative zoning amendments
+- operative rezoning/map amendment clauses
+- operative variance or special-use orders
+- continuation pages from those same instruments
+
+NON-TARGET CONTENT
+Ignore:
+- nearby non-zoning ordinances
+- purchase contracts
+- street or easement vacations unless they themselves are the zoning instrument
+- ads, classifieds, treasurer reports, and page furniture
+- diagrams and example illustrations that are not part of the ordinance text itself
+
+POST-GATE BIAS
+Because this is a post-gate transcription step, favor reconstructing the zoning ordinance body rather than rejecting the page.
+If there is clearly some operative zoning ordinance text on the page, transcribe it.
+Only leave the ordinance block empty if the page truly does not print any operative zoning ordinance text.
+
+READING ORDER
+Use the image to determine the real reading order.
+If the page is multi-column, follow the ordinance text across columns even if OCR has interleaved them badly.
+If the page contains multiple legal items, isolate the zoning ordinance and reconstruct only that item.
+
+NUMERIC AND STRUCTURED TOKEN RULE
+Pay special attention to:
+- ordinance numbers
+- section numbers
+- district labels
+- legal descriptions
+- measurements
+- dates
+- votes
+- signatures and attestation lines
+
+These are common OCR failure points.
+Use the image aggressively to repair them.
+
+STRUCTURING RULE
+Format the output as readable legal text:
+- keep headings
+- keep section/subsection structure
+- keep numbering
+- use paragraph breaks where they improve readability
+- merge broken words and wrapped lines
+- remove duplicate overlap caused by OCR
+
+PLACEHOLDERS
+Use `[ILLEGIBLE]` or `[MISSING TEXT]` only when, after using both image and local context, the wording still cannot be reasonably reconstructed.
+
+NOTES
+In `NOTES`, briefly state the major repairs you made from the image.
+Call out:
+- repaired ordinance numbers
+- repaired district labels
+- repaired section numbering
+- reordered columns
+- restored effective-date / attestation wording
+- unresolved `[ILLEGIBLE]` areas
+
+MANDATORY OUTPUT CONTRACT
+You MUST always print all three parts in this exact order:
+1. SOURCE line
+2. === ORDINANCE TEXT === block
+3. --- NOTES --- block
+
+If the page truly has no operative zoning ordinance text, leave the ordinance block empty and say so briefly in NOTES.
+
+OUTPUT FORMAT
+SOURCE: {SOURCE_NAME}
+
+=== ORDINANCE TEXT ===
+<cleaned ordinance text, or leave blank if none qualifies>
+
+--- NOTES ---
+- <note 1>
+
+PAGE_ID: {PAGE_ID}
+
+OCR PAGE TRANSCRIPT:
+<<<
+{OCR_PAGE_TEXT}

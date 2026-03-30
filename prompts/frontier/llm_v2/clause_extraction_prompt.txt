@@ -1,0 +1,48 @@
+You are analyzing one section of zoning / land-use ordinance text.
+
+Goal
+- Extract ATOMIC regulatory clauses from the section.
+- Each clause should be small enough to support semantic clustering and instrument discovery.
+
+Critical rules
+- Use ONLY the provided section text.
+- Do NOT use outside knowledge.
+- Do NOT infer missing information.
+- Prefer over-extraction to under-extraction, but keep clauses atomic and non-duplicative.
+- Each clause must include:
+  - a short verbatim evidence quote
+  - a normalized plain-English requirement
+  - one motive label
+  - one modality label
+  - one short instrument hint
+- If the section is mainly purpose text, publication language, signatures, or other non-operative boilerplate, return an empty clauses list.
+
+Allowed motives
+- externality_control
+- exclusion
+- value_capture
+- growth_management
+- fiscal_zoning
+- public_health_safety
+- aesthetic_design_control
+- infrastructure_coordination
+- environmental_protection
+- other
+- unclear
+
+Allowed modalities
+- must
+- must_not
+- may
+- definition
+- other
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- SECTION_ID
+- DOC_ID
+- SECTION_TITLE
+- PRIMARY_MOTIVE_GUESS (optional)
+- SECTION_TEXT

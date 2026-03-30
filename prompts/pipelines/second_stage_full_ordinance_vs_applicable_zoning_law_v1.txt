@@ -1,0 +1,211 @@
+Task
+You are reviewing ONE complete newspaper issue transcript that has already been surfaced as potentially relevant to zoning.
+
+This is a SECOND-STAGE classification task. Your job is not to reproduce the full fine-grained ontology. Your job is to separate:
+1) issues that print a full or broadly comprehensive zoning ordinance or zoning code publication,
+2) issues that do not print a full ordinance, but do print applicable zoning law or an official zoning decision,
+3) issues that do not actually print applicable zoning law.
+
+Primary goal
+Maximize precision for:
+- full_ordinance_text
+- other_applicable_zoning_law
+
+Output format requirements
+- Output EXACTLY ONE valid JSON object matching the schema below.
+- Output must be a SINGLE LINE: no newline or carriage-return characters anywhere.
+- Do not use markdown, code fences, or backticks.
+- Do not output multiple JSON objects.
+- Do not include the double-quote character inside ANY string value, including rationale and evidence_quote. If the source contains quotes, omit them or replace them with apostrophes.
+- Keep evidence_quote short, preferably 260 characters or less.
+- Replace any line breaks from the transcript with spaces.
+
+Core distinction
+This task is about printed applicable zoning law, not just zoning relevance.
+
+Printed applicable zoning law means the issue itself prints clause-structured zoning instrument text or a formal zoning decision that a researcher could use as legal content. This includes:
+- a broad zoning ordinance or zoning code publication,
+- a code excerpt or installment,
+- an amendment with actual amendment clauses,
+- a limited-scope zoning ordinance with operative sections,
+- a parcel rezoning ordinance/order,
+- a variance, special exception, conditional-use, or special-use decision/order.
+
+The following are NOT applicable printed zoning law by themselves:
+- hearing notices,
+- public-notice logistics,
+- agenda items,
+- first-reading lists,
+- ordinance captions or summaries only,
+- meeting minutes,
+- news stories,
+- editorials,
+- explanatory articles,
+- short ordinance snippets quoted inside prose,
+- non-zoning ordinance text where zoning is only mentioned incidentally.
+
+Ontology
+Allowed second_stage.class values:
+- full_ordinance_text
+- other_applicable_zoning_law
+- not_applicable_printed_zoning_law
+- uncertain
+
+Allowed second_stage.instrument_family values:
+- full_code_publication
+- code_excerpt_or_installment
+- amendment
+- limited_scope_ordinance
+- map_rezoning
+- variance_special_use
+- notice_or_summary_only
+- narrative_or_quote_only
+- non_zoning_ordinance
+- uncertain
+
+Allowed second_stage.operativity values:
+- operative
+- proposed
+- unclear
+- none
+
+Class definitions
+1) full_ordinance_text
+Use this only when the issue prints a broad, comprehensive zoning ordinance or zoning code publication.
+
+This class CAN include operative or proposed publications. Do not require final enactment. A proposed but fully printed comprehensive ordinance still counts as full_ordinance_text.
+
+Strong signals for full_ordinance_text:
+- official ordinance or zoning code publication framing,
+- broad article or section structure,
+- district framework or map framework,
+- multiple substantive code components, such as use rules plus dimensional rules plus administration or enforcement,
+- text that reads like a comprehensive ordinance publication rather than a single amendment or single parcel action.
+
+Do NOT use full_ordinance_text for:
+- a single amendment,
+- a single rezoning ordinance,
+- a single variance or special-use order,
+- a hearing notice that quotes a few code sections,
+- a narrative article explaining a zoning ordinance,
+- a code excerpt/installment that is clearly partial rather than broadly comprehensive.
+
+2) other_applicable_zoning_law
+Use this when the issue prints applicable zoning legal text, but it is not a broad comprehensive ordinance publication.
+
+This includes:
+- code excerpts or installments,
+- amendment text,
+- limited-scope zoning ordinances,
+- parcel rezoning orders,
+- variance or special-use decisions,
+- other clearly printed clause-structured zoning law that is narrower than a full ordinance publication.
+
+3) not_applicable_printed_zoning_law
+Use this when the issue does not actually print applicable zoning law.
+
+This includes:
+- notice-only or summary-only zoning content,
+- narrative reporting or editorial discussion,
+- quoted snippets in stories or notices,
+- non-zoning ordinance text,
+- issues with zoning references but no printed usable legal instrument text.
+
+4) uncertain
+Use only when OCR damage or ambiguity is severe enough that you cannot confidently place the issue conservatively.
+
+Important guardrails
+- A notice page can still be other_applicable_zoning_law if it actually prints substantive amendment clauses, rezoning clauses, or formal decision clauses.
+- A proposed comprehensive ordinance can still be full_ordinance_text if the issue truly prints the broad ordinance text.
+- A hearing notice that merely quotes one setback rule, parking rule, or a short section is still not_applicable_printed_zoning_law.
+- A narrative or editorial that quotes code language in prose is still not_applicable_printed_zoning_law.
+- If the printed strong-form text is actually building, traffic, housing, bond, or other non-zoning law, use not_applicable_printed_zoning_law with instrument_family = non_zoning_ordinance.
+
+Instrument family guidance
+- full_code_publication:
+  comprehensive zoning ordinance or zoning code publication
+- code_excerpt_or_installment:
+  printed zoning code sections or installments that are real code text but not broadly comprehensive in this issue
+- amendment:
+  amendment formula plus substantive zoning replacement or addition
+- limited_scope_ordinance:
+  ordinance text for a limited zoning regime such as airport zoning, flood district, overlay, planned district, special district
+- map_rezoning:
+  parcel or tract zoning-classification change
+- variance_special_use:
+  formal decision or ordinance granting or denying variance, special exception, conditional use, or special use
+- notice_or_summary_only:
+  no applicable printed law; only notice logistics, summaries, captions, or adoption summaries
+- narrative_or_quote_only:
+  no applicable printed law; only reporting, explanation, editorial, or quoted snippets in prose
+- non_zoning_ordinance:
+  printed instrument text is real, but it is not zoning law
+
+Operativity guidance
+- operative:
+  adopted, enacted, approved, effective, passed, signed, attested, or equivalent final signals
+- proposed:
+  proposed, draft, first reading, hearing notice, to be considered, submitted to voters, recommendation, or otherwise not yet final
+- unclear:
+  mixed or missing cues
+- none:
+  only when class = not_applicable_printed_zoning_law and no actual zoning instrument text is printed
+
+full_ordinance_signals
+Set these booleans based only on printed text in the issue:
+- official_publication_framing:
+  ordinance/code publication framing is explicit
+- broad_code_structure:
+  multiple sections/articles or similarly broad structured ordinance text are printed
+- district_framework_present:
+  districts, zone map framework, or broad zoning framework is printed
+- multiple_substantive_components_present:
+  at least two of the following appear in printed ordinance text:
+  use rules, dimensional rules, administration/boards, enforcement/penalties, definitions
+
+Quality flags
+Allowed values only:
+- mixed_issue_content
+- possible_non_zoning_text
+- ocr_noise
+- comprehensive_but_partial_issue
+- broad_publication_but_status_unclear
+
+JSON schema template
+{"second_stage":{"class":"uncertain","instrument_family":"uncertain","operativity":"unclear","confidence_0_to_1":0.0,"evidence_quote":""},"full_ordinance_signals":{"official_publication_framing":false,"broad_code_structure":false,"district_framework_present":false,"multiple_substantive_components_present":false},"quality_flags":[],"rationale":""}
+
+Consistency constraints
+- If second_stage.class = full_ordinance_text:
+  - instrument_family must be full_code_publication
+  - second_stage.operativity must not be none
+  - at least three of the four full_ordinance_signals should usually be true
+- If second_stage.class = other_applicable_zoning_law:
+  - instrument_family must be one of code_excerpt_or_installment|amendment|limited_scope_ordinance|map_rezoning|variance_special_use
+  - second_stage.operativity must not be none
+- If second_stage.class = not_applicable_printed_zoning_law:
+  - instrument_family must be one of notice_or_summary_only|narrative_or_quote_only|non_zoning_ordinance
+  - all full_ordinance_signals should be false, unless the issue is mixed and you set mixed_issue_content
+- If second_stage.class = uncertain:
+  - instrument_family may be uncertain
+
+Decision procedure
+1) Decide whether the issue prints applicable zoning law at all.
+2) If yes, decide whether it is a broad comprehensive ordinance publication or a narrower legal instrument.
+3) Choose instrument_family.
+4) Choose operativity separately.
+5) Set full_ordinance_signals.
+6) Set confidence, quality_flags, and rationale conservatively.
+
+Calibration examples
+- Full proposed ordinance submitted to voters, but the issue prints broad ordinance text with sections, districts, administration, and effect language:
+  => full_ordinance_text, instrument_family full_code_publication, operativity proposed
+- Hearing notice that quotes one setback section and one parking section:
+  => not_applicable_printed_zoning_law, instrument_family notice_or_summary_only
+- Editorial criticizing a proposed zoning ordinance while quoting a section:
+  => not_applicable_printed_zoning_law, instrument_family narrative_or_quote_only
+- Airport zoning ordinance with detailed operative sections:
+  => other_applicable_zoning_law, instrument_family limited_scope_ordinance
+- Parcel rezoning ordinance changing one tract from R-1 to C-2:
+  => other_applicable_zoning_law, instrument_family map_rezoning
+
+Return the single-line JSON object only.

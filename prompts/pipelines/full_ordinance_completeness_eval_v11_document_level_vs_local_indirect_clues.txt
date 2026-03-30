@@ -1,0 +1,87 @@
+You are auditing whether the CURRENT extracted ordinance text is actually the
+full ordinance text, not merely whether it is readable.
+
+Judge only the artifact you were given. Do not reconstruct missing language.
+
+Decision procedure:
+
+1. Explicit gap evidence.
+If you see any of the following, return `definitely_incomplete`:
+- `[MISSING TEXT]`
+- explicit notes that earlier pages, later pages, intervening sections, or
+  continuation pages are unavailable
+- `continued from page ...` near the start
+- `continued on page ...` near the end
+- text that clearly begins or ends in the middle of a sentence, section, or
+  article
+- explicit jumps that clearly omit major ordinance blocks
+
+2. Publication-form evidence.
+If there is no explicit gap evidence, decide whether the artifact is:
+- a full ordinance text
+- a summary / digest / abstract of an ordinance
+- an adopting ordinance that says the real code text is elsewhere and only a
+  summary or enumeration is printed here
+
+Map that as follows:
+- summary / digest with substantial article or section coverage ->
+  `likely_incomplete`
+- adopting ordinance plus externalized code text -> `definitely_incomplete`
+
+3. If there is no explicit gap evidence and no summary/external-text evidence,
+distinguish DOCUMENT-LEVEL indirect clues from LOCAL indirect clues.
+
+Document-level indirect clues:
+- the document stops at a plausible but suspicious place
+- one section appears to be missing a whole category of regulation or a whole
+  block that the current section itself seems to imply should exist
+- several different parts of the ordinance show larger structural irregularity
+
+Local indirect clues:
+- skipped numbers inside one list
+- a few [ILLEGIBLE] spots
+- minor within-section discontinuities
+- omitted customary closing boilerplate when the document otherwise has a normal
+  opening and ending
+
+Use this rule:
+- only local indirect clues -> `complete_or_nearly_complete`
+- multiple document-level indirect clues, but still no explicit page-loss
+  evidence -> `uncertain`
+
+Important:
+- Do NOT treat a few skipped list numbers inside an otherwise well-framed
+  ordinance as enough for `uncertain`.
+- Use `uncertain` only when the indirect clues are about the document's larger
+  structure, not merely local extraction noise.
+- Do NOT jump from indirect clues alone to `likely_incomplete` unless the
+  current text itself clearly states or strongly implies that substantive text
+  is omitted.
+
+Weak defects by themselves do not justify incompleteness:
+- `[ILLEGIBLE]`, `[UNREADABLE]`, or a few corrupted words
+- omitted zoning maps or referenced attachments
+- a skipped section number by itself
+- odd formatting or OCR noise
+
+Hard rules:
+- If there is no explicit gap evidence and no summary/external-text evidence,
+  you may NOT return `definitely_incomplete`.
+- If the artifact is explicitly a summary/digest but still contains substantial
+  ordinance text, prefer `likely_incomplete`, not `definitely_incomplete`.
+- Do not infer incompleteness just because neighboring zones elsewhere in the
+  ordinance have more subsections.
+
+When estimating missing share:
+- estimate only missing substantive ordinance body
+- do not count trivial OCR corruption
+- for `uncertain`, use a conservative estimate or `null` if you cannot defend a
+  number
+
+Return strict JSON matching the required schema.
+
+Issue ID: {{ISSUE_ID}}
+
+Current extracted ordinance text:
+
+{{ORDINANCE_TEXT}}

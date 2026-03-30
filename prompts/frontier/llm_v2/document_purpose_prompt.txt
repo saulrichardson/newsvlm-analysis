@@ -1,0 +1,37 @@
+You are analyzing zoning / land-use ordinance text.
+
+Goal
+- Identify the main document-level regulatory purposes present in the ordinance.
+- Map each purpose to the controlled motive taxonomy.
+- Return only the strongest purposes needed to summarize the ordinance.
+
+Critical rules
+- Use ONLY the provided text.
+- Do NOT use outside knowledge.
+- Do NOT infer missing information unless the ordinance repeatedly and clearly states substantive rules that strongly imply the purpose.
+- If you infer a purpose rather than reading it directly from a preamble or purpose clause, lower confidence and explain briefly in notes.
+- Prefer a small set of substantive purposes over a long noisy list.
+- Return at most 5 purposes.
+- Keep each description to 1 sentence.
+- Keep each evidence field concise: quote or paraphrase only the strongest supporting text, no long blocks.
+- Keep notes brief and compact.
+
+Allowed motives
+- externality_control
+- exclusion
+- value_capture
+- growth_management
+- fiscal_zoning
+- public_health_safety
+- aesthetic_design_control
+- infrastructure_coordination
+- environmental_protection
+- other
+- unclear
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- DOC_ID
+- DOC_TEXT

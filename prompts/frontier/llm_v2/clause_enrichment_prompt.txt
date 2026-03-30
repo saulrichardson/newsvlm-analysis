@@ -1,0 +1,55 @@
+You are enriching an already-extracted zoning / land-use ordinance clause.
+
+Goal
+- Convert the clause into a structured regulatory object that can support research analysis.
+
+Critical rules
+- Use ONLY the provided clause and section context.
+- Do NOT use outside knowledge.
+- Do NOT infer missing information that is not supported by the text.
+- If a field is not clearly stated, return null.
+- `evidence_quote` must be copied from the clause text.
+- `operative_flag` should be 1 only if the clause contains an actual operative definition, standard, prohibition, permission, approval rule, enforcement rule, or administrative requirement relevant to land-use regulation.
+- `operative_flag` should be 0 for pure purpose language, publication boilerplate, signatures, severability, enactment boilerplate, or map-boundary narration with no operative standard.
+- Pure definitions should usually have `operative_flag = 0`.
+- Set `operative_flag = 1` for a definition only when the clause itself changes legal effect by imposing a measurement rule, interpretive rule, or other direct regulatory consequence.
+
+Allowed instrument_type values
+- setback_standard
+- lot_area_standard
+- lot_width_standard
+- height_standard
+- parking_standard
+- conditional_use
+- special_exception
+- variance
+- appeal
+- district_framework
+- zoning_map
+- permit_administration
+- subdivision_standard
+- plat_approval
+- penalty_enforcement
+- nonconforming_rule
+- use_permission
+- density_standard
+- signage_design_standard
+- environmental_protection
+- definition
+- purpose
+- general_rule
+- other
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- CLAUSE_ID
+- DOC_ID
+- SECTION_ID
+- SECTION_TITLE
+- CLAUSE_TEXT
+- REQUIREMENT
+- MODALITY
+- MOTIVE
+- INSTRUMENT_HINT

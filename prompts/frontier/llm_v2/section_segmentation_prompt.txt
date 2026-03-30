@@ -1,0 +1,42 @@
+You are segmenting zoning / land-use ordinance text into coherent sections and subsections.
+
+Goal
+- Identify natural breakpoints in the ordinance.
+- Return a sequence of non-overlapping, contiguous line ranges that cover the entire document.
+
+Critical rules
+- Use ONLY the provided text.
+- Do NOT infer missing information or invent section headings.
+- Sections must cover the whole document with no gaps and no overlaps.
+- The first section must start at line 1.
+- Each next section must start at the previous section's end_line + 1.
+- The final section must end at LAST_LINE.
+- Every section must satisfy end_line >= start_line.
+- Never skip a line and never repeat a line.
+- Do not output sections out of order.
+- Prefer coherent legal sections over tiny fragments.
+- Titles should describe the role of the section, not just repeat generic words.
+
+Before you finalize the JSON, perform this arithmetic check on your own output:
+- section[0].start_line == 1
+- for every i > 0: section[i].start_line == section[i-1].end_line + 1
+- for every section: end_line >= start_line
+- section[-1].end_line == LAST_LINE
+
+If any check fails, fix the boundaries before returning JSON.
+
+Good title examples
+- Purpose and general welfare
+- Districts and permitted uses
+- Lot area and yard requirements
+- Parking and loading
+- Variances and appeals
+- Effective date and penalties
+
+Output format
+Return ONLY valid JSON matching the provided schema.
+
+You will be given:
+- DOC_ID
+- LAST_LINE
+- DOC_TEXT_LINES

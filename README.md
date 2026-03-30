@@ -3,31 +3,39 @@
 This repository contains **analysis workflows** built on top of the upstream extraction artifacts produced by the
 `newsvlm` engine repo (OCR `*.vlm.json`, zoning labels, issue-level outputs, stitched ordinance docs, etc.).
 
-It includes the `agent-gateway` repo as an (optional) git submodule (`agent-gateway/`) so that scripts can easily run
-**many concurrent LLM requests** locally without depending on a separate checkout.
+It vendors the `agent-gateway` repo as an optional git submodule under `vendor/agent-gateway/` so that scripts can run
+many concurrent LLM requests locally without depending on a separate checkout.
 
 If you need to make new extraction outputs, do that in the engine repo first, then point these scripts at the resulting
 artifacts.
 
 ## What lives here
 
-- `docs/`: workflow documentation (topic discovery, hybrid regulatory topics, etc.)
-- `scripts/`: clustering, plotting, report builders, RHS construction, etc.
-- `prompts/`: analysis-only prompts (e.g. cluster labeling / instrument labeling)
-- `slurm/`: HPC wrappers for analysis runs
-- `reports/`: report outputs and report templates
+- `src/newsvlm_analysis/frontier/`: active modular analysis code
+- `scripts/frontier/`: frontier entrypoints and report builders
+- `scripts/pipelines/`: active issue-classifier, transcription, and recovery workflows
+- `scripts/platform/`: gateway and batch execution utilities
+- `prompts/frontier/`: frontier prompt bundles
+- `prompts/pipelines/`: active workflow prompts
+- `docs/workflows/`: current workflow documentation
+- `reports/curated/`: commit-worthy report bundles
+- `artifacts/`: local run outputs, scratch work, and generated reports
+- `archive/legacy/`: quarantined legacy workflows, docs, prompts, and reports
+- `vendor/agent-gateway/`: optional gateway submodule
 
 ## Repository organization framework
 
-The repo uses a strict split between commit-worthy artifacts and local run outputs:
+The repo now uses a strict split between active code, curated outputs, and local artifacts:
 
-- `reports/hybrid_regulatory_topics_report`, `reports/issue_topics_report`, `reports/rhs_v4_full_writeup`: curated report bundles kept in git.
-- `reports/runs/`: local run artifacts (large/intermediate outputs). Ignored by git except `reports/runs/README.md`.
-- `scratch/`: local one-off experiments and temporary files. Ignored by git except `scratch/README.md`.
+- `reports/curated/`: curated report bundles kept in git.
+- `artifacts/runs/`: local run roots. Ignored by git except `artifacts/runs/README.md`.
+- `artifacts/scratch/`: local one-off experiments and temporary files. Ignored by git except `artifacts/scratch/README.md`.
+- `artifacts/reports/`: generated or exploratory report material not meant for version control.
+- `archive/legacy/`: older flat workflows kept out of the active surface area.
 
 Rule of thumb:
-- Commit code, docs, prompts, and curated reports.
-- Do not commit raw batch outputs, temporary run roots, or ad-hoc scratch experiments.
+- Commit active code, workflow docs, prompts, and curated reports.
+- Do not commit raw batch outputs, temporary run roots, ad-hoc scratch experiments, or generated report dumps.
 
 ## Setup (local dev)
 
@@ -49,9 +57,9 @@ Rule of thumb:
    ```bash
    pip install -r requirements.txt
    ```
-5. (Optional) Install `agent-gateway` into the same env (needed for `scripts/run_openai_requests_via_gateway.py` and other LLM-backed workflows):
+5. (Optional) Install the vendored gateway into the same env (needed for `scripts/platform/run_openai_requests_via_gateway.py` and other LLM-backed workflows):
    ```bash
-   pip install -e agent-gateway
+   pip install -e vendor/agent-gateway
    ```
 
 ## Notes on reproducibility
@@ -60,3 +68,4 @@ For any run that generates downstream datasets or reports, record:
 - the `newsvlm` engine commit/tag used to generate inputs
 - the exact prompt files used
 - the source manifest(s) and run roots on VAST/Greene
+- the corresponding local `artifacts/runs/...` or `artifacts/reports/...` output location

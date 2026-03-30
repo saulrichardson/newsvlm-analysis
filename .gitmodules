@@ -1,3 +1,3 @@
-[submodule "agent-gateway"]
-	path = agent-gateway
+[submodule "vendor/agent-gateway"]
+	path = vendor/agent-gateway
 	url = https://github.com/saulrichardson/agent-gateway

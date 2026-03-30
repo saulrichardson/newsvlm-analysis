@@ -11,17 +11,26 @@ venv/
 
 # macOS
 .DS_Store
+.playwright-cli/
 
 # Local run artifacts / scratch
 tmp_*/
 tmp_*
 .tmp_unique_vlm*.rel
-scratch/*
-!scratch/README.md
-reports/runs/*
-!reports/runs/README.md
-reports/tmp/
-safekeep/
+artifacts/*
+!artifacts/README.md
+!artifacts/runs/
+!artifacts/scratch/
+artifacts/misc/*
+artifacts/output/*
+artifacts/reports/*
+artifacts/runs/*
+!artifacts/runs/README.md
+artifacts/scratch/*
+!artifacts/scratch/README.md
+artifacts/safekeep/*
+artifacts/tmp/*
+archive/legacy/old-stuff/
 newspaper-analysis-local/
 
 # LaTeX build artifacts (keep sources like .tex/.bib/.sty, ignore generated files)
